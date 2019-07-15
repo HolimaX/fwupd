@@ -10,6 +10,16 @@
       <package />
     </distro>
   </dependency>
+  <dependency type="build" id="libabigail">
+    <distro id="fedora">
+      <package />
+    </distro>
+  </dependency>
+  <dependency type="build" id="git-core">
+    <distro id="fedora">
+      <package />
+    </distro>
+  </dependency>
   <dependency type="build" id="bash-completion">
     <distro id="debian">
       <control />
