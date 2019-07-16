@@ -24,6 +24,8 @@ jobs:
       name: "Check for ABI breaks"
       env:
         - OS=fedora
+      install:
+        - ./contrib/ci/generate_docker.py
       before_script:
         - docker build -t fwupd-${OS} -f contrib/ci/Dockerfile-${OS} .
       script:
