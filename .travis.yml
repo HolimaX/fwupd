@@ -21,7 +21,6 @@ jobs:
       env:
         - OS=fedora
       before_script:
-        - ./contrib/ci/generate_docker.py
-        - docker build -t fwupd-${OS} -f contrib/ci/Dockerfile-${OS} .
+        - docker build -t fwupd-${OS} -f ./contrib/ci/Dockerfile-${OS} .
       script:
         - docker run -t -v `pwd`:/build fwupd-${OS} ./contrib/ci/check-abi $(git describe --abbrev=0 --tags) $(git rev-parse HEAD)
