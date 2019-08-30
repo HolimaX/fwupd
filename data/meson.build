@@ -2,6 +2,7 @@ subdir('builder')
 subdir('pki')
 subdir('remotes.d')
 subdir('bash-completion')
+subdir('motd')
 
 if get_option('tests')
   subdir('tests')
@@ -38,11 +39,8 @@ if get_option('systemd')
   con2.set('bindir', bindir)
   con2.set('datadir', datadir)
   con2.set('localstatedir', localstatedir)
-
+  con2.set('package_name', meson.project_name())
   rw_directories = []
-  rw_directories += join_paths (localstatedir, 'lib', 'fwupd')
-  rw_directories += join_paths (sysconfdir, 'fwupd')
-  rw_directories += join_paths (sysconfdir, 'fwupd', 'remotes.d')
   if get_option('plugin_uefi')
     rw_directories += ['-/boot/efi', '-/efi/EFI', '-/boot/EFI']
   endif

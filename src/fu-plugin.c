@@ -600,7 +600,7 @@ fu_plugin_get_smbios_string (FuPlugin *self, guint8 structure_type, guint8 offse
  *
  * Gets a hardware SMBIOS data.
  *
- * Returns: (transfer none): A #GBytes, or %NULL
+ * Returns: (transfer full): A #GBytes, or %NULL
  *
  * Since: 0.9.8
  **/
@@ -1305,6 +1305,43 @@ fu_plugin_runner_udev_device_added (FuPlugin *self, FuUdevDevice *device, GError
 	return TRUE;
 }
 
+gboolean
+fu_plugin_runner_udev_device_changed (FuPlugin *self, FuUdevDevice *device, GError **error)
+{
+	FuPluginPrivate *priv = GET_PRIVATE (self);
+	FuPluginUdevDeviceAddedFunc func = NULL;
+	g_autoptr(GError) error_local = NULL;
+
+	/* not enabled */
+	if (!priv->enabled)
+		return TRUE;
+
+	/* no object loaded */
+	if (priv->module == NULL)
+		return TRUE;
+
+	/* optional */
+	g_module_symbol (priv->module, "fu_plugin_udev_device_changed", (gpointer *) &func);
+	if (func == NULL)
+		return TRUE;
+	g_debug ("performing udev_device_changed() on %s", priv->name);
+	if (!func (self, device, &error_local)) {
+		if (error_local == NULL) {
+			g_critical ("unset error in plugin %s for udev_device_changed()",
+				    priv->name);
+			g_set_error_literal (&error_local,
+					     FWUPD_ERROR,
+					     FWUPD_ERROR_INTERNAL,
+					     "unspecified error");
+		}
+		g_propagate_prefixed_error (error, g_steal_pointer (&error_local),
+					    "failed to change device on %s: ",
+					    priv->name);
+		return FALSE;
+	}
+	return TRUE;
+}
+
 void
 fu_plugin_runner_device_removed (FuPlugin *self, FuDevice *device)
 {
@@ -1977,6 +2014,7 @@ fu_plugin_init (FuPlugin *self)
 {
 	FuPluginPrivate *priv = GET_PRIVATE (self);
 	priv->enabled = TRUE;
+	priv->udev_subsystems = g_ptr_array_new_with_free_func (g_free);
 	priv->devices = g_hash_table_new_full (g_str_hash, g_str_equal,
 					       g_free, (GDestroyNotify) g_object_unref);
 	g_rw_lock_init (&priv->devices_mutex);

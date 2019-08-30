@@ -1,5 +1,5 @@
 project('fwupd', 'c',
-  version : '1.2.11',
+  version : '1.3.1',
   license : 'LGPL-2.1+',
   meson_version : '>=0.47.0',
   default_options : ['warning_level=2', 'c_std=c99'],
@@ -79,6 +79,7 @@ warning_flags = [
   '-Wno-cast-function-type',
   '-Wno-address-of-packed-member',  # incompatible with g_autoptr()
   '-Wno-unknown-pragmas',
+  '-Wno-deprecated-declarations',
   '-Wno-discarded-qualifiers',
   '-Wno-missing-field-initializers',
   '-Wno-strict-aliasing',
@@ -219,6 +220,7 @@ if get_option('plugin_uefi')
   efiboot = dependency('efiboot')
   objcopy = find_program ('objcopy')
   readelf = find_program ('readelf')
+  tpm2tss = dependency('tss2-esys', version : '>= 2.0')
 
   efi_app_location = join_paths(libexecdir, 'fwupd', 'efi')
   conf.set_quoted ('EFI_APP_LOCATION', efi_app_location)
