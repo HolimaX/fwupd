@@ -7,6 +7,7 @@
 #include "config.h"
 
 #include <libsoup/soup.h>
+#include <jcat.h>
 
 #include "fwupd-deprecated.h"
 #include "fwupd-enums-private.h"
@@ -48,6 +49,7 @@ typedef struct {
 	gchar			**order_after;
 	gchar			**order_before;
 	gchar			*remotes_dir;
+	gboolean		 automatic_reports;
 } FwupdRemotePrivate;
 
 enum {
@@ -55,6 +57,7 @@ enum {
 	PROP_ID,
 	PROP_ENABLED,
 	PROP_APPROVAL_REQUIRED,
+	PROP_AUTOMATIC_REPORTS,
 	PROP_LAST
 };
 
@@ -144,16 +147,6 @@ fwupd_remote_set_filename_source (FwupdRemote *self, const gchar *filename_sourc
 	priv->filename_source = g_strdup (filename_source);
 }
 
-static const gchar *
-fwupd_remote_get_suffix_for_keyring_kind (FwupdKeyringKind keyring_kind)
-{
-	if (keyring_kind == FWUPD_KEYRING_KIND_GPG)
-		return ".asc";
-	if (keyring_kind == FWUPD_KEYRING_KIND_PKCS7)
-		return ".p7b";
-	return NULL;
-}
-
 static SoupURI *
 fwupd_remote_build_uri (FwupdRemote *self, const gchar *url, GError **error)
 {
@@ -229,7 +222,6 @@ static void
 fwupd_remote_set_metadata_uri (FwupdRemote *self, const gchar *metadata_uri)
 {
 	FwupdRemotePrivate *priv = GET_PRIVATE (self);
-	const gchar *suffix;
 	g_autoptr(SoupURI) uri = NULL;
 
 	/* build the URI */
@@ -241,9 +233,8 @@ fwupd_remote_set_metadata_uri (FwupdRemote *self, const gchar *metadata_uri)
 	priv->metadata_uri = g_strdup (metadata_uri);
 
 	/* generate the signature URI too */
-	suffix = fwupd_remote_get_suffix_for_keyring_kind (priv->keyring_kind);
-	if (suffix != NULL)
-		priv->metadata_uri_sig = g_strconcat (metadata_uri, suffix, NULL);
+	if (priv->keyring_kind == FWUPD_KEYRING_KIND_JCAT)
+		priv->metadata_uri_sig = g_strconcat (metadata_uri, ".jcat", NULL);
 }
 
 /* note, this has to be set after MetadataURI */
@@ -309,7 +300,6 @@ static void
 fwupd_remote_set_filename_cache (FwupdRemote *self, const gchar *filename)
 {
 	FwupdRemotePrivate *priv = GET_PRIVATE (self);
-	const gchar *suffix;
 
 	g_return_if_fail (FWUPD_IS_REMOTE (self));
 
@@ -317,10 +307,9 @@ fwupd_remote_set_filename_cache (FwupdRemote *self, const gchar *filename)
 	priv->filename_cache = g_strdup (filename);
 
 	/* create for all remote types */
-	suffix = fwupd_remote_get_suffix_for_keyring_kind (priv->keyring_kind);
-	if (suffix != NULL) {
+	if (priv->keyring_kind == FWUPD_KEYRING_KIND_JCAT) {
 		g_free (priv->filename_cache_sig);
-		priv->filename_cache_sig = g_strconcat (filename, suffix, NULL);
+		priv->filename_cache_sig = g_strconcat (filename, ".jcat", NULL);
 	}
 }
 
@@ -373,7 +362,7 @@ fwupd_remote_load_from_filename (FwupdRemote *self,
 	/* get verification type, falling back to GPG */
 	keyring_kind = g_key_file_get_string (kf, group, "Keyring", NULL);
 	if (keyring_kind == NULL) {
-		priv->keyring_kind = FWUPD_KEYRING_KIND_GPG;
+		priv->keyring_kind = FWUPD_KEYRING_KIND_JCAT;
 	} else {
 		priv->keyring_kind = fwupd_keyring_kind_from_string (keyring_kind);
 		if (priv->keyring_kind == FWUPD_KEYRING_KIND_UNKNOWN) {
@@ -383,6 +372,11 @@ fwupd_remote_load_from_filename (FwupdRemote *self,
 				     "Failed to parse type '%s'",
 				     keyring_kind);
 			return FALSE;
+		}
+		if (priv->keyring_kind == FWUPD_KEYRING_KIND_GPG ||
+		    priv->keyring_kind == FWUPD_KEYRING_KIND_PKCS7) {
+			g_debug ("converting Keyring value to Jcat");
+			priv->keyring_kind = FWUPD_KEYRING_KIND_JCAT;
 		}
 	}
 
@@ -420,6 +414,9 @@ fwupd_remote_load_from_filename (FwupdRemote *self,
 	report_uri = g_key_file_get_string (kf, group, "ReportURI", NULL);
 	if (report_uri != NULL && report_uri[0] != '\0')
 		fwupd_remote_set_report_uri (self, report_uri);
+
+	/* automatic report uploading */
+	priv->automatic_reports = g_key_file_get_boolean (kf, group, "AutomaticReports", NULL);
 
 	/* DOWNLOAD-type remotes */
 	if (priv->kind == FWUPD_REMOTE_KIND_DOWNLOAD) {
@@ -901,6 +898,72 @@ fwupd_remote_get_metadata_uri (FwupdRemote *self)
 }
 
 /**
+ * fwupd_remote_load_signature:
+ * @self: A #FwupdRemote
+ * @filename: A filename
+ * @error: the #GError, or %NULL
+ *
+ * Parses the signature, updating the metadata URI as appropriate.
+ *
+ * Returns: %TRUE for success
+ *
+ * Since: 1.4.0
+ **/
+gboolean
+fwupd_remote_load_signature (FwupdRemote *self, const gchar *filename, GError **error)
+{
+	FwupdRemotePrivate *priv = GET_PRIVATE (self);
+	const gchar *id;
+	g_autofree gchar *basename = NULL;
+	g_autofree gchar *baseuri = NULL;
+	g_autofree gchar *metadata_uri = NULL;
+	g_autoptr(GFile) gfile = NULL;
+	g_autoptr(JcatFile) jcat_file = jcat_file_new ();
+	g_autoptr(JcatItem) jcat_item = NULL;
+
+	g_return_val_if_fail (FWUPD_IS_REMOTE (self), FALSE);
+	g_return_val_if_fail (filename != NULL, FALSE);
+	g_return_val_if_fail (error == NULL || *error == NULL, FALSE);
+
+	/* load JCat file */
+	gfile = g_file_new_for_path (filename);
+	if (!jcat_file_import_file (jcat_file, gfile, JCAT_IMPORT_FLAG_NONE, NULL, error))
+		return FALSE;
+
+	/* this seems pointless to get the item by ID then just read the ID,
+	 * but _get_item_by_id() uses the AliasIds as a fallback */
+	basename = g_path_get_basename (priv->metadata_uri);
+	jcat_item = jcat_file_get_item_by_id (jcat_file, basename, NULL);
+	if (jcat_item == NULL) {
+		/* if we're using libjcat 0.1.0 just get the default item */
+		jcat_item = jcat_file_get_item_default (jcat_file, error);
+		if (jcat_item == NULL)
+			return FALSE;
+	}
+	id = jcat_item_get_id (jcat_item);
+	if (id == NULL) {
+		g_set_error_literal (error,
+				     FWUPD_ERROR,
+				     FWUPD_ERROR_INVALID_FILE,
+				     "No ID for JCat item");
+		return FALSE;
+	}
+
+	/* replace the URI if required */
+	baseuri = g_path_get_dirname (priv->metadata_uri);
+	metadata_uri = g_build_filename (baseuri, id, NULL);
+	if (g_strcmp0 (metadata_uri, priv->metadata_uri) != 0) {
+		g_debug ("changing metadata URI from %s to %s",
+			 priv->metadata_uri, metadata_uri);
+		g_free (priv->metadata_uri);
+		priv->metadata_uri = g_steal_pointer (&metadata_uri);
+	}
+
+	/* success */
+	return TRUE;
+}
+
+/**
  * fwupd_remote_get_metadata_uri_sig:
  * @self: A #FwupdRemote
  *
@@ -952,6 +1015,24 @@ fwupd_remote_get_enabled (FwupdRemote *self)
 	FwupdRemotePrivate *priv = GET_PRIVATE (self);
 	g_return_val_if_fail (FWUPD_IS_REMOTE (self), FALSE);
 	return priv->enabled;
+}
+
+/**
+ * fwupd_remote_get_automatic_reports:
+ * @self: A #FwupdRemote
+ *
+ * Gets if reports should be automatically uploaded to this remote
+ *
+ * Returns: a #TRUE if the remote should have reports uploaded automatically
+ *
+ * Since: 1.3.3
+ **/
+gboolean
+fwupd_remote_get_automatic_reports (FwupdRemote *self)
+{
+	FwupdRemotePrivate *priv = GET_PRIVATE (self);
+	g_return_val_if_fail (FWUPD_IS_REMOTE (self), FALSE);
+	return priv->automatic_reports;
 }
 
 /**
@@ -1040,6 +1121,8 @@ fwupd_remote_set_from_variant_iter (FwupdRemote *self, GVariantIter *iter)
 			priv->mtime = g_variant_get_uint64 (value);
 		} else if (g_strcmp0 (key, "FirmwareBaseUri") == 0) {
 			fwupd_remote_set_firmware_base_uri (self, g_variant_get_string (value, NULL));
+		} else if (g_strcmp0 (key, "AutomaticReports") == 0) {
+			priv->automatic_reports = g_variant_get_boolean (value);
 		}
 	}
 }
@@ -1132,6 +1215,8 @@ fwupd_remote_to_variant (FwupdRemote *self)
 			       g_variant_new_boolean (priv->enabled));
 	g_variant_builder_add (&builder, "{sv}", "ApprovalRequired",
 			       g_variant_new_boolean (priv->approval_required));
+	g_variant_builder_add (&builder, "{sv}", "AutomaticReports",
+			       g_variant_new_boolean (priv->automatic_reports));
 	return g_variant_new ("a{sv}", &builder);
 }
 
@@ -1151,6 +1236,9 @@ fwupd_remote_get_property (GObject *obj, guint prop_id,
 		break;
 	case PROP_ID:
 		g_value_set_string (value, priv->id);
+		break;
+	case PROP_AUTOMATIC_REPORTS:
+		g_value_set_boolean (value, priv->automatic_reports);
 		break;
 	default:
 		G_OBJECT_WARN_INVALID_PROPERTY_ID (obj, prop_id, pspec);
@@ -1174,6 +1262,9 @@ fwupd_remote_set_property (GObject *obj, guint prop_id,
 		break;
 	case PROP_ID:
 		fwupd_remote_set_id (self, g_value_get_string (value));
+		break;
+	case PROP_AUTOMATIC_REPORTS:
+		priv->automatic_reports = g_value_get_boolean (value);
 		break;
 	default:
 		G_OBJECT_WARN_INVALID_PROPERTY_ID (obj, prop_id, pspec);
@@ -1223,6 +1314,18 @@ fwupd_remote_class_init (FwupdRemoteClass *klass)
 	pspec = g_param_spec_boolean ("approval-required", NULL, NULL,
 				      FALSE, G_PARAM_READWRITE | G_PARAM_STATIC_NAME);
 	g_object_class_install_property (object_class, PROP_APPROVAL_REQUIRED, pspec);
+
+	/**
+	* FwupdRemote:automatic-reports:
+	*
+	* The behavior for auto-uploading reports.
+	*
+	* Since: 1.3.3
+	*/
+	pspec = g_param_spec_boolean ("automatic-reports", NULL, NULL,
+				      FALSE, G_PARAM_READWRITE | G_PARAM_STATIC_NAME);
+	g_object_class_install_property (object_class, PROP_AUTOMATIC_REPORTS, pspec);
+
 }
 
 static void

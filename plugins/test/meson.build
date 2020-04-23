@@ -11,14 +11,35 @@ shared_module('fu_plugin_test',
     'fu-plugin-test.c',
   ],
   include_directories : [
-    include_directories('../..'),
-    include_directories('../../src'),
-    include_directories('../../libfwupd'),
+    root_incdir,
+    fwupd_incdir,
+    fwupdplugin_incdir,
   ],
   install : install_dummy,
   install_dir: plugin_dir,
   link_with : [
-    libfwupdprivate,
+    fwupd,
+    fwupdplugin,
+  ],
+  c_args : cargs,
+  dependencies : [
+    plugin_deps,
+  ],
+)
+
+shared_module('fu_plugin_invalid',
+  sources : [
+    'fu-plugin-invalid.c',
+  ],
+  include_directories : [
+    root_incdir,
+    fwupd_incdir,
+    fwupdplugin_incdir,
+  ],
+  install : install_dummy,
+  install_dir: plugin_dir,
+  link_with : [
+    fwupdplugin,
   ],
   c_args : cargs,
   dependencies : [

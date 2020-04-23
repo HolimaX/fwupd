@@ -10,7 +10,6 @@
 #include <string.h>
 
 #include "fu-common.h"
-#include "fu-test.h"
 #include "fu-wac-common.h"
 #include "fu-wac-firmware.h"
 
@@ -28,8 +27,8 @@ fu_wac_firmware_parse_func (void)
 	g_autoptr(GError) error = NULL;
 
 	/* parse the test file */
-	fn = fu_test_get_filename (TESTDATADIR, "test.wac");
-	if (fn == NULL) {
+	fn = g_build_filename (TESTDATADIR, "test.wac", NULL);
+	if (!g_file_test (fn, G_FILE_TEST_EXISTS)) {
 		g_test_skip ("no data file found");
 		return;
 	}
@@ -46,7 +45,7 @@ fu_wac_firmware_parse_func (void)
 	g_assert_nonnull (img);
 
 	/* get block */
-	blob_block = fu_firmware_image_get_bytes_chunk (img, 0x8008000, 1024, &error);
+	blob_block = fu_firmware_image_write_chunk (img, 0x8008000, 1024, &error);
 	g_assert_no_error (error);
 	g_assert_nonnull (blob_block);
 	fu_wac_buffer_dump ("IMG", FU_WAC_REPORT_ID_MODULE,

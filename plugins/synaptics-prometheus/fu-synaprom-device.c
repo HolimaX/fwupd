@@ -144,7 +144,7 @@ fu_synaprom_device_set_version (FuSynapromDevice *self,
 
 	/* set display version */
 	str = g_strdup_printf ("%02u.%02u.%u", vmajor, vminor, buildnum);
-	fu_device_set_version (FU_DEVICE (self), str, FWUPD_VERSION_FORMAT_TRIPLET);
+	fu_device_set_version (FU_DEVICE (self), str);
 
 	/* we need this for checking the firmware compatibility later */
 	self->vmajor = vmajor;
@@ -204,7 +204,9 @@ fu_synaprom_device_setup (FuDevice *device, GError **error)
 	}
 
 	/* add updatable config child, if this is a production sensor */
-	if (pkt.security[1] & FU_SYNAPROM_SECURITY1_PROD_SENSOR) {
+	if (fu_device_get_children (device)->len == 0 &&
+	    !fu_device_has_flag (device, FWUPD_DEVICE_FLAG_IS_BOOTLOADER) &&
+	    pkt.security[1] & FU_SYNAPROM_SECURITY1_PROD_SENSOR) {
 		g_autoptr(FuSynapromConfig) cfg = fu_synaprom_config_new (self);
 		if (!fu_device_setup (FU_DEVICE (cfg), error)) {
 			g_prefix_error (error, "failed to get config version: ");
@@ -236,7 +238,6 @@ fu_synaprom_device_prepare_fw (FuDevice *device,
 			       FwupdInstallFlags flags,
 			       GError **error)
 {
-	FuSynapromDevice *self = FU_SYNAPROM_DEVICE (device);
 	FuSynapromFirmwareMfwHeader hdr;
 	guint32 product;
 	g_autoptr(GBytes) blob = NULL;
@@ -272,23 +273,6 @@ fu_synaprom_device_prepare_fw (FuDevice *device,
 				     "MFW metadata not compatible, "
 				     "got 0x%02x expected 0x%02x",
 				     product, (guint) FU_SYNAPROM_PRODUCT_PROMETHEUS);
-			return NULL;
-		}
-	}
-	if (hdr.vmajor != self->vmajor || hdr.vminor != self->vminor) {
-		if (flags & FWUPD_INSTALL_FLAG_FORCE) {
-			g_warning ("MFW version not compatible, "
-				   "got %u.%u expected %u.%u",
-				   hdr.vmajor, hdr.vminor,
-				   self->vmajor, self->vminor);
-		} else {
-			g_set_error (error,
-				     G_IO_ERROR,
-				     G_IO_ERROR_NOT_SUPPORTED,
-				     "MFW version not compatible, "
-				     "got %u.%u expected %u.%u",
-				     hdr.vmajor, hdr.vminor,
-				     self->vmajor, self->vminor);
 			return NULL;
 		}
 	}
@@ -370,6 +354,12 @@ fu_synaprom_device_attach (FuDevice *device, GError **error)
 	gsize actual_len = 0;
 	guint8 data[] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
 
+	/* sanity check */
+	if (!fu_device_has_flag (device, FWUPD_DEVICE_FLAG_IS_BOOTLOADER)) {
+		g_debug ("already in runtime mode, skipping");
+		return TRUE;
+	}
+
 	ret = g_usb_device_control_transfer (usb_device,
 					     G_USB_DEVICE_DIRECTION_HOST_TO_DEVICE,
 					     G_USB_DEVICE_REQUEST_TYPE_VENDOR,
@@ -393,6 +383,7 @@ fu_synaprom_device_attach (FuDevice *device, GError **error)
 		g_prefix_error (error, "failed to force-reset device: ");
 		return FALSE;
 	}
+	fu_device_remove_flag (device, FWUPD_DEVICE_FLAG_IS_BOOTLOADER);
 	return TRUE;
 }
 
@@ -404,6 +395,12 @@ fu_synaprom_device_detach (FuDevice *device, GError **error)
 	gsize actual_len = 0;
 	guint8 data[] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00 };
 
+	/* sanity check */
+	if (fu_device_has_flag (device, FWUPD_DEVICE_FLAG_IS_BOOTLOADER)) {
+		g_debug ("already in bootloader mode, skipping");
+		return TRUE;
+	}
+
 	ret = g_usb_device_control_transfer (usb_device,
 					     G_USB_DEVICE_DIRECTION_HOST_TO_DEVICE,
 					     G_USB_DEVICE_REQUEST_TYPE_VENDOR,
@@ -427,6 +424,7 @@ fu_synaprom_device_detach (FuDevice *device, GError **error)
 		g_prefix_error (error, "failed to force-reset device: ");
 		return FALSE;
 	}
+	fu_device_add_flag (device, FWUPD_DEVICE_FLAG_IS_BOOTLOADER);
 	return TRUE;
 }
 
@@ -434,6 +432,9 @@ static void
 fu_synaprom_device_init (FuSynapromDevice *self)
 {
 	fu_device_add_flag (FU_DEVICE (self), FWUPD_DEVICE_FLAG_UPDATABLE);
+	fu_device_add_flag (FU_DEVICE (self), FWUPD_DEVICE_FLAG_CAN_VERIFY);
+	fu_device_set_version_format (FU_DEVICE (self), FWUPD_VERSION_FORMAT_TRIPLET);
+	fu_device_set_protocol (FU_DEVICE (self), "com.synaptics.prometheus");
 	fu_device_set_remove_delay (FU_DEVICE (self), FU_DEVICE_REMOVE_DELAY_RE_ENUMERATE);
 	fu_device_set_name (FU_DEVICE (self), "Prometheus");
 	fu_device_set_summary (FU_DEVICE (self), "Fingerprint reader");
@@ -449,6 +450,7 @@ fu_synaprom_device_class_init (FuSynapromDeviceClass *klass)
 	klass_device->write_firmware = fu_synaprom_device_write_firmware;
 	klass_device->prepare_firmware = fu_synaprom_device_prepare_fw;
 	klass_device->setup = fu_synaprom_device_setup;
+	klass_device->reload = fu_synaprom_device_setup;
 	klass_device->attach = fu_synaprom_device_attach;
 	klass_device->detach = fu_synaprom_device_detach;
 	klass_usb_device->open = fu_synaprom_device_open;

@@ -66,11 +66,6 @@ msgstr "’n Bywerking vereis dat die stelsel herbegin om te voltooi."
 msgid "Answer yes to all questions"
 msgstr "Antwoord ja op alle vrae"
 
-#. TRANSLATORS: device attributes, i.e. things that
-#. * the device can do
-msgid "Attributes"
-msgstr "Attribute"
-
 #. TRANSLATORS: this is to abort the interactive prompt
 msgid "Cancel"
 msgstr "Kanselleer"
@@ -84,14 +79,9 @@ msgstr "Gekanselleer"
 msgid "Changed"
 msgstr "Verander"
 
-#. TRANSLATORS: section header for firmware checksum
 #. TRANSLATORS: remote checksum
 msgid "Checksum"
 msgstr "Kontrolesom"
-
-#. TRANSLATORS: chip ID, e.g. "0x58200204"
-msgid "Chip ID"
-msgstr "Vlokkie-ID"
 
 #. TRANSLATORS: get interactive prompt
 msgid "Choose a device:"
@@ -105,14 +95,11 @@ msgstr "Kies 'n vrystelling:"
 msgid "Command not found"
 msgstr "Opdrag nie gevind nie"
 
-msgid "DFU"
-msgstr "DFU"
-
 #. TRANSLATORS: decompressing the firmware file
 msgid "Decompressing…"
 msgstr "Pak tans uit…"
 
-#. TRANSLATORS: section header for firmware description
+#. TRANSLATORS: multiline description of device
 msgid "Description"
 msgstr "Beskrywing"
 
@@ -188,17 +175,6 @@ msgstr "Lêernaam"
 msgid "Filename Signature"
 msgstr "Lêernaamhandtekening"
 
-#. TRANSLATORS: detected a DFU device
-msgid "Found"
-msgstr "Gevind"
-
-msgid "GUID"
-msgstr "GUID"
-
-#. TRANSLATORS: Appstream ID for the hardware type
-msgid "ID"
-msgstr "ID"
-
 #. TRANSLATORS: daemon is inactive
 msgid "Idle…"
 msgstr "Ledig…"
@@ -223,28 +199,9 @@ msgstr "Laai tans…"
 msgid "Metadata URI"
 msgstr "Metadata-URI"
 
-#. TRANSLATORS: remote URI
-msgid "Metadata URI Signature"
-msgstr "Metadata-URI-handtekening"
-
-msgid "Mode"
-msgstr "Modus"
-
-#. TRANSLATORS: interface name, e.g. "Flash"
-#. TRANSLATORS: device name, e.g. 'ColorHug2'
-#. TRANSLATORS: section header for the release name
-msgid "Name"
-msgstr "Naam"
-
-msgid "OK"
-msgstr "Goed"
-
 #. TRANSLATORS: remote filename base
 msgid "Password"
 msgstr "Wagwoord"
-
-msgid "Permission denied"
-msgstr "Toestemming gewyer"
 
 msgid "Print the version number"
 msgstr "Druk die weergawenommer"
@@ -256,17 +213,9 @@ msgstr "Prioriteit"
 msgid "Proceed with upload?"
 msgstr "Gaan voort met oplaai?"
 
-#. TRANSLATORS: DFU protocol version, e.g. 1.1
-msgid "Protocol"
-msgstr "Protokol"
-
 #. TRANSLATORS: reading from the flash chips
 msgid "Reading…"
 msgstr "Lees tans…"
-
-#. TRANSLATORS: these are areas of memory on the chip
-msgid "Region"
-msgstr "Streek"
 
 #. TRANSLATORS: the first replacement is a display name
 #. * e.g. "ColorHugALS" and the second is a version number
@@ -295,83 +244,30 @@ msgstr "Herbegin tans toestel…"
 msgid "Schedule installation for next reboot when possible"
 msgstr "Skeduleer die installasie vir die volgende herbegin indien moontlik"
 
-#. TRANSLATORS: scheduing an update to be done on the next boot
+#. TRANSLATORS: scheduling an update to be done on the next boot
 msgid "Scheduling…"
 msgstr "Skeduleer tans…"
-
-#. TRANSLATORS: serial number, e.g. '00012345'
-msgid "Serial"
-msgstr "Reeksnommer"
 
 #. TRANSLATORS: command line option
 msgid "Show devices that are not updatable"
 msgstr "Wys toestelle wat nie bygewerk kan word nie"
 
-#. TRANSLATORS: device state, i.e. appIDLE
-msgid "State"
-msgstr "Toestand"
-
-#. TRANSLATORS: probably not run as root...
-#. TRANSLATORS: device has failed to report status
-#. TRANSLATORS: device status, e.g. "OK"
-msgid "Status"
-msgstr "Status"
-
-#. TRANSLATORS: section header for the release one line summary
+#. TRANSLATORS: one line summary of device
 msgid "Summary"
 msgstr "Opsomming"
 
 msgid "Target"
 msgstr "Teiken"
 
-#. TRANSLATORS: remote title, e.g. "Linux Vendor Firmware Service"
-msgid "Title"
-msgstr "Titel"
-
-#. TRANSLATORS: transfer size in bytes
-msgid "Transfer Size"
-msgstr "Oordraggrootte"
-
 #. TRANSLATORS: remote type, e.g. remote or local
 msgid "Type"
 msgstr "Tipe"
 
-#. TRANSLATORS: section header for firmware URI
-msgid "URI"
-msgstr "URI"
-
-#. TRANSLATORS: currect daemon status is unknown
+#. TRANSLATORS: current daemon status is unknown
+#. TRANSLATORS: we don't know the license of the update
+#. TRANSLATORS: unknown release urgency
 msgid "Unknown"
 msgstr "Onbekend"
-
-#. TRANSLATORS: section header for firmware checksum
-msgid "Update Checksum"
-msgstr "Bywerking se kontrolesom"
-
-#. TRANSLATORS: section header for long firmware desc
-msgid "Update Description"
-msgstr "Bywerking se beskrywing"
-
-#. TRANSLATORS: section header for the amount
-#. * of time it takes to install the update
-msgid "Update Duration"
-msgstr "Bywerking se duur"
-
-#. TRANSLATORS: section header for firmware remote http://
-msgid "Update Location"
-msgstr "Bywerking se ligging"
-
-#. TRANSLATORS: section header for the release name
-msgid "Update Name"
-msgstr "Bywerking se naam"
-
-#. TRANSLATORS: section header for the release one line summary
-msgid "Update Summary"
-msgstr "Bywerking se opsomming"
-
-#. TRANSLATORS: section header for firmware version
-msgid "Update Version"
-msgstr "Bywerking se weergawe"
 
 #. TRANSLATORS: ask the user if we can update the metadata
 msgid "Update now?"
@@ -404,10 +300,6 @@ msgstr "Gebruikernaam"
 #. TRANSLATORS: verifying we wrote the firmware correctly
 msgid "Verifying…"
 msgstr "Verifieer tans…"
-
-#. TRANSLATORS: section header for release version number
-msgid "Version"
-msgstr "Weergawe"
 
 #. TRANSLATORS: waiting for device to do something
 msgid "Waiting…"

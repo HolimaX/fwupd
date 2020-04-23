@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include "fu-common.h"
 #include "fu-qmi-pdc-updater.h"
 
 #define FU_QMI_PDC_MAX_OPEN_ATTEMPTS 8
@@ -356,7 +357,7 @@ fu_qmi_pdc_updater_load_config (WriteContext *ctx)
 
 	chunk = g_array_sized_new (FALSE, FALSE, sizeof (guint8), chunk_size);
 	g_array_set_size (chunk, chunk_size);
-	if (!fu_memcpy_safe (chunk->data, chunk_size, 0x0,				/* dst */
+	if (!fu_memcpy_safe ((guint8 *)chunk->data, chunk_size, 0x0,			/* dst */
 			     (const guint8 *)g_bytes_get_data (ctx->blob, NULL),	/* src */
 			     g_bytes_get_size (ctx->blob), ctx->offset,
 			     chunk_size, &error)) {
@@ -493,7 +494,7 @@ fu_qmi_pdc_updater_activate_config_ready (GObject *qmi_client, GAsyncResult *res
 	output = qmi_client_pdc_activate_config_finish (QMI_CLIENT_PDC (qmi_client), res, &ctx->error);
 	if (output == NULL) {
 		/* If we didn't receive a response, this is a good indication that the device
-		 * reseted itself, we can consider this a successful operation.
+		 * reset itself, we can consider this a successful operation.
 		 * Note: not using g_error_matches() to avoid matching the domain, because the
 		 * error may be either QMI_CORE_ERROR_TIMEOUT or MBIM_CORE_ERROR_TIMEOUT (same
 		 * numeric value), and we don't want to build-depend on libmbim just for this.

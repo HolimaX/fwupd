@@ -12,9 +12,6 @@ GUID Generation
 
 The HID DeviceInstanceId values are used, e.g. `HIDRAW\VEN_056A&DEV_4875`.
 
-Additionally, for supported AES devices an extra GUID is added for the hardware
-ID (e.g. `WACOM\HWID_%04X`) to further disambiguate the panels.
-
 Firmware Format
 ---------------
 
@@ -34,3 +31,8 @@ This plugin uses the following plugin-specific quirks:
 | `WacomI2cFlashBlockSize`| Block size to transfer firmware     | 1.2.4                 |
 | `WacomI2cFlashBaseAddr` | Base address for firmware           | 1.2.4                 |
 | `WacomI2cFlashSize`     | Maximum size of the firmware zone   | 1.2.4                 |
+
+Vendor ID Security
+------------------
+
+The vendor ID is set from the udev vendor, in this instance set to `HIDRAW:0x056A`

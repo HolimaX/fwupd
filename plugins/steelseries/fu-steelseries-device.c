@@ -87,7 +87,7 @@ fu_steelseries_device_setup (FuDevice *device, GError **error)
 		return FALSE;
 	}
 	version = g_strdup_printf ("%i.%i.%i", data[0], data[1], data[2]);
-	fu_device_set_version (FU_DEVICE (device), version, FWUPD_VERSION_FORMAT_TRIPLET);
+	fu_device_set_version (FU_DEVICE (device), version);
 
 	/* success */
 	return TRUE;
@@ -114,6 +114,7 @@ fu_steelseries_device_close (FuUsbDevice *device, GError **error)
 static void
 fu_steelseries_device_init (FuSteelseriesDevice *device)
 {
+	fu_device_set_version_format (FU_DEVICE (device), FWUPD_VERSION_FORMAT_TRIPLET);
 }
 
 static void
@@ -124,12 +125,4 @@ fu_steelseries_device_class_init (FuSteelseriesDeviceClass *klass)
 	klass_device->setup = fu_steelseries_device_setup;
 	klass_usb_device->open = fu_steelseries_device_open;
 	klass_usb_device->close = fu_steelseries_device_close;
-}
-
-FuSteelseriesDevice *
-fu_steelseries_device_new (FuUsbDevice *device)
-{
-	FuSteelseriesDevice *self = g_object_new (FU_TYPE_STEELSERIES_DEVICE, NULL);
-	fu_device_incorporate (FU_DEVICE (self), FU_DEVICE (device));
-	return self;
 }

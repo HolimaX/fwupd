@@ -6,6 +6,10 @@ install_data([
   install_dir: join_paths(datadir, 'fwupd', 'quirks.d')
 )
 
+install_data(['ata.conf'],
+  install_dir:  join_paths(sysconfdir, 'fwupd')
+)
+
 shared_module('fu_plugin_ata',
   fu_hash,
   sources : [
@@ -13,9 +17,9 @@ shared_module('fu_plugin_ata',
     'fu-ata-device.c',
   ],
   include_directories : [
-    include_directories('../..'),
-    include_directories('../../src'),
-    include_directories('../../libfwupd'),
+    root_incdir,
+    fwupd_incdir,
+    fwupdplugin_incdir,
   ],
   install : true,
   install_dir: plugin_dir,
@@ -24,7 +28,8 @@ shared_module('fu_plugin_ata',
     '-DLOCALSTATEDIR="' + localstatedir + '"',
   ],
   link_with : [
-    libfwupdprivate,
+    fwupd,
+    fwupdplugin,
   ],
   dependencies : [
     plugin_deps,
@@ -42,16 +47,16 @@ if get_option('tests')
       'fu-ata-device.c',
     ],
     include_directories : [
-      include_directories('..'),
-      include_directories('../..'),
-      include_directories('../../libfwupd'),
-      include_directories('../../src'),
+      root_incdir,
+      fwupd_incdir,
+      fwupdplugin_incdir,
     ],
     dependencies : [
       plugin_deps,
     ],
     link_with : [
-      libfwupdprivate,
+      fwupd,
+      fwupdplugin,
     ],
     c_args : cargs
   )

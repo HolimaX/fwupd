@@ -81,7 +81,8 @@ fu_history_device_from_stmt (sqlite3_stmt *stmt)
 		fwupd_release_set_filename (release, tmp);
 
 	/* flags */
-	fu_device_set_flags (device, sqlite3_column_int64 (stmt, 7));
+	fu_device_set_flags (device, sqlite3_column_int64 (stmt, 7) |
+				     FWUPD_DEVICE_FLAG_HISTORICAL);
 
 	/* metadata */
 	tmp = (const gchar *) sqlite3_column_text (stmt, 8);
@@ -115,7 +116,7 @@ fu_history_device_from_stmt (sqlite3_stmt *stmt)
 	/* version_old */
 	tmp = (const gchar *) sqlite3_column_text (stmt, 13);
 	if (tmp != NULL)
-		fu_device_set_version (device, tmp, FWUPD_VERSION_FORMAT_UNKNOWN);
+		fu_device_set_version (device, tmp);
 
 	/* checksum_device */
 	tmp = (const gchar *) sqlite3_column_text (stmt, 14);
@@ -370,7 +371,7 @@ fu_history_load (FuHistory *self, GError **error)
 	g_autofree gchar *dirname = NULL;
 	g_autofree gchar *filename = NULL;
 	g_autoptr(GFile) file = NULL;
-	g_autoptr(GRWLockReaderLocker) locker = g_rw_lock_writer_locker_new (&self->db_mutex);
+	g_autoptr(GRWLockWriterLocker) locker = g_rw_lock_writer_locker_new (&self->db_mutex);
 
 	/* already done */
 	if (self->db != NULL)
@@ -456,14 +457,24 @@ fu_history_get_device_flags_filtered (FuDevice *device)
 	return flags;
 }
 
+/**
+ * fu_history_modify_device:
+ * @self: A #FuHistory
+ * @device: A #FuDevice
+ * @error: A #GError or NULL
+ *
+ * Modify a device in the history database
+ *
+ * Returns: @TRUE if successful, @FALSE for failure
+ *
+ * Since: 1.0.4
+ **/
 gboolean
-fu_history_modify_device (FuHistory *self, FuDevice *device,
-			  FuHistoryFlags flags,
-			  GError **error)
+fu_history_modify_device (FuHistory *self, FuDevice *device, GError **error)
 {
 	gint rc;
 	g_autoptr(sqlite3_stmt) stmt = NULL;
-	g_autoptr(GRWLockReaderLocker) locker = NULL;
+	g_autoptr(GRWLockWriterLocker) locker = NULL;
 
 	g_return_val_if_fail (FU_IS_HISTORY (self), FALSE);
 	g_return_val_if_fail (FU_IS_DEVICE (device), FALSE);
@@ -475,48 +486,18 @@ fu_history_modify_device (FuHistory *self, FuDevice *device,
 	/* overwrite entry if it exists */
 	locker = g_rw_lock_writer_locker_new (&self->db_mutex);
 	g_return_val_if_fail (locker != NULL, FALSE);
-	if ((flags & FU_HISTORY_FLAGS_MATCH_OLD_VERSION) &&
-	    (flags & FU_HISTORY_FLAGS_MATCH_NEW_VERSION)) {
-		g_debug ("modifying device %s [%s], version not important",
-			 fu_device_get_name (device),
-			 fu_device_get_id (device));
-		rc = sqlite3_prepare_v2 (self->db,
-					 "UPDATE history SET "
-					 "update_state = ?1, "
-					 "update_error = ?2, "
-					 "checksum_device = ?6, "
-					 "flags = ?3 "
-					 "WHERE device_id = ?4;",
-					 -1, &stmt, NULL);
-	} else if (flags & FU_HISTORY_FLAGS_MATCH_OLD_VERSION) {
-		g_debug ("modifying device %s [%s], only version old %s",
-			 fu_device_get_name (device),
-			 fu_device_get_id (device),
-			 fu_device_get_version (device));
-		rc = sqlite3_prepare_v2 (self->db,
-					 "UPDATE history SET "
-					 "update_state = ?1, "
-					 "update_error = ?2, "
-					 "checksum_device = ?6, "
-					 "flags = ?3 "
-					 "WHERE device_id = ?4 AND version_old = ?5;",
-					 -1, &stmt, NULL);
-	} else if (flags & FU_HISTORY_FLAGS_MATCH_NEW_VERSION) {
-		g_debug ("modifying device %s [%s], only version new %s",
-			 fu_device_get_name (device),
-			 fu_device_get_id (device),
-			 fu_device_get_version (device));
-		rc = sqlite3_prepare_v2 (self->db,
-					 "UPDATE history SET "
-					 "update_state = ?1, "
-					 "update_error = ?2, "
-					 "checksum_device = ?6, "
-					 "flags = ?3 "
-					 "WHERE device_id = ?4 AND version_new = ?5;",
-					 -1, &stmt, NULL);
-	} else {
-		g_assert_not_reached ();
-	}
+	g_debug ("modifying device %s [%s]",
+		 fu_device_get_name (device),
+		 fu_device_get_id (device));
+	rc = sqlite3_prepare_v2 (self->db,
+				 "UPDATE history SET "
+				 "update_state = ?1, "
+				 "update_error = ?2, "
+				 "checksum_device = ?6, "
+				 "device_modified = ?7, "
+				 "flags = ?3 "
+				 "WHERE device_id = ?4;",
+				 -1, &stmt, NULL);
 	if (rc != SQLITE_OK) {
 		g_set_error (error, FWUPD_ERROR, FWUPD_ERROR_INTERNAL,
 			     "Failed to prepare SQL to update history: %s",
@@ -531,9 +512,24 @@ fu_history_modify_device (FuHistory *self, FuDevice *device,
 	sqlite3_bind_text (stmt, 5, fu_device_get_version (device), -1, SQLITE_STATIC);
 	sqlite3_bind_text (stmt, 6, fwupd_checksum_get_by_kind (fu_device_get_checksums (device),
 								G_CHECKSUM_SHA1), -1, SQLITE_STATIC);
+	sqlite3_bind_int64 (stmt, 7, fu_device_get_modified (device));
+
 	return fu_history_stmt_exec (self, stmt, NULL, error);
 }
 
+/**
+ * fu_history_add_device:
+ * @self: A #FuHistory
+ * @device: A #FuDevice
+ * @release: A #FuRelease
+ * @error: A #GError or NULL
+ *
+ * Adds a device to the history database
+ *
+ * Returns: @TRUE if successful, @FALSE for failure
+ *
+ * Since: 1.0.4
+ **/
 gboolean
 fu_history_add_device (FuHistory *self, FuDevice *device, FwupdRelease *release, GError **error)
 {
@@ -542,7 +538,7 @@ fu_history_add_device (FuHistory *self, FuDevice *device, FwupdRelease *release,
 	gint rc;
 	g_autofree gchar *metadata = NULL;
 	g_autoptr(sqlite3_stmt) stmt = NULL;
-	g_autoptr(GRWLockReaderLocker) locker = NULL;
+	g_autoptr(GRWLockWriterLocker) locker = NULL;
 
 	g_return_val_if_fail (FU_IS_HISTORY (self), FALSE);
 	g_return_val_if_fail (FU_IS_DEVICE (device), FALSE);
@@ -552,10 +548,9 @@ fu_history_add_device (FuHistory *self, FuDevice *device, FwupdRelease *release,
 	if (!fu_history_load (self, error))
 		return FALSE;
 
-	/* ensure device with this old-version -> new-version does not exist */
-	if (!fu_history_remove_device (self, device, release, error))
+	/* ensure all old device(s) with this ID are removed */
+	if (!fu_history_remove_device (self, device, error))
 		return FALSE;
-
 	g_debug ("add device %s [%s]",
 		 fu_device_get_name (device),
 		 fu_device_get_id (device));
@@ -616,6 +611,19 @@ fu_history_add_device (FuHistory *self, FuDevice *device, FwupdRelease *release,
 	return fu_history_stmt_exec (self, stmt, NULL, error);
 }
 
+/**
+ * fu_history_remove_all_with_state:
+ * @self: A #FuHistory
+ * @update_state: A #FwupdUpdateState
+ * @error: A #GError or NULL
+ *
+ * Remove all devices from the history database that match
+ * state update_state
+ *
+ * Returns: @TRUE if successful, @FALSE for failure
+ *
+ * Since: 1.0.4
+ **/
 gboolean
 fu_history_remove_all_with_state (FuHistory *self,
 				  FwupdUpdateState update_state,
@@ -623,7 +631,7 @@ fu_history_remove_all_with_state (FuHistory *self,
 {
 	gint rc;
 	g_autoptr(sqlite3_stmt) stmt = NULL;
-	g_autoptr(GRWLockReaderLocker) locker = NULL;
+	g_autoptr(GRWLockWriterLocker) locker = NULL;
 
 	g_return_val_if_fail (FU_IS_HISTORY (self), FALSE);
 
@@ -649,12 +657,23 @@ fu_history_remove_all_with_state (FuHistory *self,
 	return fu_history_stmt_exec (self, stmt, NULL, error);
 }
 
+/**
+ * fu_history_remove_all:
+ * @self: A #FuHistory
+ * @error: A #GError or NULL
+ *
+ * Remove all devices from the history database
+ *
+ * Returns: @TRUE if successful, @FALSE for failure
+ *
+ * Since: 1.0.4
+ **/
 gboolean
 fu_history_remove_all (FuHistory *self, GError **error)
 {
 	gint rc;
 	g_autoptr(sqlite3_stmt) stmt = NULL;
-	g_autoptr(GRWLockReaderLocker) locker = NULL;
+	g_autoptr(GRWLockWriterLocker) locker = NULL;
 
 	g_return_val_if_fail (FU_IS_HISTORY (self), FALSE);
 
@@ -676,17 +695,27 @@ fu_history_remove_all (FuHistory *self, GError **error)
 	return fu_history_stmt_exec (self, stmt, NULL, error);
 }
 
+/**
+ * fu_history_remove_device:
+ * @self: A #FuHistory
+ * @device: A #FuDevice
+ * @error: A #GError or NULL
+ *
+ * Remove a device from the history database
+ *
+ * Returns: @TRUE if successful, @FALSE for failure
+ *
+ * Since: 1.0.4
+ **/
 gboolean
-fu_history_remove_device (FuHistory *self,  FuDevice *device,
-			  FwupdRelease *release, GError **error)
+fu_history_remove_device (FuHistory *self,  FuDevice *device, GError **error)
 {
 	gint rc;
 	g_autoptr(sqlite3_stmt) stmt = NULL;
-	g_autoptr(GRWLockReaderLocker) locker = NULL;
+	g_autoptr(GRWLockWriterLocker) locker = NULL;
 
 	g_return_val_if_fail (FU_IS_HISTORY (self), FALSE);
 	g_return_val_if_fail (FU_IS_DEVICE (device), FALSE);
-	g_return_val_if_fail (FWUPD_IS_RELEASE (release), FALSE);
 
 	/* lazy load */
 	if (!fu_history_load (self, error))
@@ -698,9 +727,7 @@ fu_history_remove_device (FuHistory *self,  FuDevice *device,
 		 fu_device_get_name (device),
 		 fu_device_get_id (device));
 	rc = sqlite3_prepare_v2 (self->db,
-				 "DELETE FROM history WHERE device_id = ?1 "
-				 "AND version_old = ?2 "
-				 "AND version_new = ?3;",
+				 "DELETE FROM history WHERE device_id = ?1;",
 				 -1, &stmt, NULL);
 	if (rc != SQLITE_OK) {
 		g_set_error (error, FWUPD_ERROR, FWUPD_ERROR_INTERNAL,
@@ -709,11 +736,22 @@ fu_history_remove_device (FuHistory *self,  FuDevice *device,
 		return FALSE;
 	}
 	sqlite3_bind_text (stmt, 1, fu_device_get_id (device), -1, SQLITE_STATIC);
-	sqlite3_bind_text (stmt, 2, fu_device_get_version (device), -1, SQLITE_STATIC);
-	sqlite3_bind_text (stmt, 3, fwupd_release_get_version (release), -1, SQLITE_STATIC);
 	return fu_history_stmt_exec (self, stmt, NULL, error);
 }
 
+
+/**
+ * fu_history_get_device_by_id:
+ * @self: A #FuHistory
+ * @device_id: A string
+ * @error: A #GError or NULL
+ *
+ * Returns the device from the history database or NULL if not found
+ *
+ * Returns: (transfer full): a #FuDevice
+ *
+ * Since: 1.0.4
+ **/
 FuDevice *
 fu_history_get_device_by_id (FuHistory *self, const gchar *device_id, GError **error)
 {
@@ -771,7 +809,17 @@ fu_history_get_device_by_id (FuHistory *self, const gchar *device_id, GError **e
 	}
 	return g_object_ref (g_ptr_array_index (array_tmp, 0));
 }
-
+/**
+ * fu_history_get_devices:
+ * @self: A #FuHistory
+ * @error: A #GError or NULL
+ *
+ * Gets the devices in the history database.
+ *
+ * Returns: (element-type #FuDevice) (transfer container): devices
+ *
+ * Since: 1.0.4
+ **/
 GPtrArray *
 fu_history_get_devices (FuHistory *self, GError **error)
 {
@@ -824,6 +872,17 @@ fu_history_get_devices (FuHistory *self, GError **error)
 	return array;
 }
 
+/**
+ * fu_history_get_approved_firmware:
+ * @self: A #FuHistory
+ * @error: A #GError or NULL
+ *
+ * Returns approved firmware records.
+ *
+ * Returns: (transfer full) (element-type gchar *): records
+ *
+ * Since: 1.2.6
+ **/
 GPtrArray *
 fu_history_get_approved_firmware (FuHistory *self, GError **error)
 {
@@ -866,12 +925,23 @@ fu_history_get_approved_firmware (FuHistory *self, GError **error)
 	return g_steal_pointer (&array);
 }
 
+/**
+ * fu_history_clear_approved_firmware:
+ * @self: A #FuHistory
+ * @error: A #GError or NULL
+ *
+ * Clear all approved firmware records
+ *
+ * Returns: #TRUE for success, #FALSE for failure
+ *
+ * Since: 1.2.6
+ **/
 gboolean
 fu_history_clear_approved_firmware (FuHistory *self, GError **error)
 {
 	gint rc;
 	g_autoptr(sqlite3_stmt) stmt = NULL;
-	g_autoptr(GRWLockReaderLocker) locker = NULL;
+	g_autoptr(GRWLockWriterLocker) locker = NULL;
 
 	g_return_val_if_fail (FU_IS_HISTORY (self), FALSE);
 
@@ -894,6 +964,18 @@ fu_history_clear_approved_firmware (FuHistory *self, GError **error)
 	return fu_history_stmt_exec (self, stmt, NULL, error);
 }
 
+/**
+ * fu_history_add_approved_firmware:
+ * @self: A #FuHistory
+ * @checksum: a string
+ * @error: A #GError or NULL
+ *
+ * Add an approved firmware record to the database
+ *
+ * Returns: #TRUE for success, #FALSE for failure
+ *
+ * Since: 1.2.6
+ **/
 gboolean
 fu_history_add_approved_firmware (FuHistory *self,
 				  const gchar *checksum,
@@ -901,7 +983,7 @@ fu_history_add_approved_firmware (FuHistory *self,
 {
 	gint rc;
 	g_autoptr(sqlite3_stmt) stmt = NULL;
-	g_autoptr(GRWLockReaderLocker) locker = NULL;
+	g_autoptr(GRWLockWriterLocker) locker = NULL;
 
 	g_return_val_if_fail (FU_IS_HISTORY (self), FALSE);
 	g_return_val_if_fail (checksum != NULL, FALSE);
@@ -951,6 +1033,13 @@ fu_history_finalize (GObject *object)
 	G_OBJECT_CLASS (fu_history_parent_class)->finalize (object);
 }
 
+/**
+ * fu_history_new:
+ *
+ * Creates a new #FuHistory
+ *
+ * Since: 1.0.4
+ **/
 FuHistory *
 fu_history_new (void)
 {

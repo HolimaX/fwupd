@@ -8,16 +8,14 @@
 
 #include <xmlb.h>
 #include <glib-object.h>
+#include <jcat.h>
 
 #include "fwupd-device.h"
 #include "fwupd-enums.h"
 
 #include "fu-common.h"
-#include "fu-keyring.h"
 #include "fu-install-task.h"
 #include "fu-plugin.h"
-
-G_BEGIN_DECLS
 
 #define FU_TYPE_ENGINE (fu_engine_get_type ())
 G_DECLARE_FINAL_TYPE (FuEngine, fu_engine, FU, ENGINE, GObject)
@@ -32,6 +30,7 @@ G_DECLARE_FINAL_TYPE (FuEngine, fu_engine, FU, ENGINE, GObject)
 typedef enum {
 	FU_ENGINE_LOAD_FLAG_NONE		= 0,
 	FU_ENGINE_LOAD_FLAG_READONLY_FS		= 1 << 0,
+	FU_ENGINE_LOAD_FLAG_NO_ENUMERATE	= 1 << 1,
 	/*< private >*/
 	FU_ENGINE_LOAD_FLAG_LAST
 } FuEngineLoadFlags;
@@ -48,6 +47,8 @@ gboolean	 fu_engine_load				(FuEngine	*self,
 gboolean	 fu_engine_load_plugins			(FuEngine	*self,
 							 GError		**error);
 gboolean	 fu_engine_get_tainted			(FuEngine	*self);
+const gchar	*fu_engine_get_host_product		(FuEngine *self);
+const gchar	*fu_engine_get_host_machine_id		(FuEngine *self);
 FwupdStatus	 fu_engine_get_status			(FuEngine	*self);
 XbSilo		*fu_engine_get_silo_from_blob		(FuEngine	*self,
 							 GBytes		*blob_cab,
@@ -58,6 +59,9 @@ GPtrArray	*fu_engine_get_devices			(FuEngine	*self,
 							 GError		**error);
 FuDevice	*fu_engine_get_device			(FuEngine	*self,
 							 const gchar	*device_id,
+							 GError		**error);
+GPtrArray	*fu_engine_get_devices_by_guid		(FuEngine	*self,
+							 const gchar	*guid,
 							 GError		**error);
 GPtrArray	*fu_engine_get_history			(FuEngine	*self,
 							 GError		**error);
@@ -86,6 +90,11 @@ gboolean	 fu_engine_update_metadata		(FuEngine	*self,
 							 gint		 fd,
 							 gint		 fd_sig,
 							 GError		**error);
+gboolean	 fu_engine_update_metadata_bytes	(FuEngine	*self,
+							 const gchar	*remote_id,
+							 GBytes		*bytes_raw,
+							 GBytes		*bytes_sig,
+							 GError		**error);
 gboolean	 fu_engine_unlock			(FuEngine	*self,
 							 const gchar	*device_id,
 							 GError		**error);
@@ -94,6 +103,10 @@ gboolean	 fu_engine_verify			(FuEngine	*self,
 							 GError		**error);
 gboolean	 fu_engine_verify_update		(FuEngine	*self,
 							 const gchar	*device_id,
+							 GError		**error);
+GBytes		*fu_engine_firmware_read		(FuEngine	*self,
+							 FuDevice	*device,
+							 FwupdInstallFlags flags,
 							 GError		**error);
 gboolean	 fu_engine_modify_remote		(FuEngine	*self,
 							 const gchar	*remote_id,
@@ -137,12 +150,21 @@ void		 fu_engine_add_approved_firmware	(FuEngine	*self,
 							 const gchar	*checksum);
 gchar		*fu_engine_self_sign			(FuEngine	*self,
 							 const gchar	*value,
-							 FuKeyringSignFlags flags,
+							 JcatSignFlags flags,
 							 GError		**error);
 gboolean	 fu_engine_modify_config		(FuEngine	*self,
 							 const gchar	*key,
 							 const gchar	*value,
 							 GError		**error);
+GPtrArray	*fu_engine_get_firmware_gtype_ids	(FuEngine	*engine);
+GType		 fu_engine_get_firmware_gtype_by_id	(FuEngine	*engine,
+							 const gchar	*id);
+void		 fu_engine_md_refresh_device_from_component (FuEngine	*self,
+							 FuDevice	*device,
+							 XbNode		*component);
+GPtrArray	*fu_engine_get_releases_for_device 	(FuEngine	*self,
+							FuDevice	*device,
+							GError		**error);
 
 /* for the self tests */
 void		 fu_engine_add_device			(FuEngine	*self,
@@ -160,5 +182,9 @@ void		 fu_engine_set_silo			(FuEngine	*self,
 							 XbSilo		*silo);
 XbNode		*fu_engine_get_component_by_guids	(FuEngine	*self,
 							 FuDevice	*device);
-
-G_END_DECLS
+gboolean	 fu_engine_schedule_update		(FuEngine	*self,
+							 FuDevice	*device,
+							 FwupdRelease	*release,
+							 GBytes		*blob_cab,
+							 FwupdInstallFlags flags,
+							 GError		**error);

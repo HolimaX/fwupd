@@ -11,6 +11,7 @@
 #include <glib.h>
 #include <glib/gi18n.h>
 
+#include "fu-common.h"
 #include "fu-progressbar.h"
 
 static void fu_progressbar_finalize	 (GObject *obj);
@@ -71,7 +72,7 @@ fu_progressbar_status_to_string (FwupdStatus status)
 		return _("Verifying…");
 		break;
 	case FWUPD_STATUS_SCHEDULING:
-		/* TRANSLATORS: scheduing an update to be done on the next boot */
+		/* TRANSLATORS: scheduling an update to be done on the next boot */
 		return _("Scheduling…");
 		break;
 	case FWUPD_STATUS_DOWNLOADING:
@@ -90,7 +91,7 @@ fu_progressbar_status_to_string (FwupdStatus status)
 		break;
 	}
 
-	/* TRANSLATORS: currect daemon status is unknown */
+	/* TRANSLATORS: current daemon status is unknown */
 	return _("Unknown");
 }
 
@@ -110,8 +111,12 @@ fu_progressbar_estimate_ready (FuProgressbar *self, guint percentage)
 	gdouble old;
 	gdouble elapsed;
 
-	if (percentage == 0 || percentage == 100)
+	/* now invalid */
+	if (percentage == 0 || percentage == 100) {
+		g_timer_start (self->time_elapsed);
+		self->last_estimate = 0;
 		return FALSE;
+	}
 
 	old = self->last_estimate;
 	elapsed = g_timer_elapsed (self->time_elapsed, NULL);
@@ -160,7 +165,7 @@ fu_progressbar_refresh (FuProgressbar *self, FwupdStatus status, guint percentag
 	}
 	title = fu_progressbar_status_to_string (status);
 	g_string_append (str, title);
-	for (i = g_utf8_strlen (str->str, -1); i < self->length_status; i++)
+	for (i = fu_common_strwidth (str->str); i < self->length_status; i++)
 		g_string_append_c (str, ' ');
 
 	/* add progressbar */
@@ -199,6 +204,15 @@ fu_progressbar_refresh (FuProgressbar *self, FwupdStatus status, guint percentag
 	}
 }
 
+/**
+ * fu_progressbar_set_title:
+ * @self: A #FuProgressbar
+ * @title: A string
+ *
+ * Sets progressbar title
+ *
+ * Since: 0.9.7
+ **/
 void
 fu_progressbar_set_title (FuProgressbar *self, const gchar *title)
 {
@@ -265,6 +279,16 @@ fu_progressbar_spin_start (FuProgressbar *self)
 	self->timer_id = g_timeout_add (40, fu_progressbar_spin_cb, self);
 }
 
+/**
+ * fu_progressbar_update:
+ * @self: A #FuProgressbar
+ * @status: A #FwupdStatus
+ * @percentage: unsigned integer
+ *
+ * Refreshes a progressbar
+ *
+ * Since: 0.9.7
+ **/
 void
 fu_progressbar_update (FuProgressbar *self, FwupdStatus status, guint percentage)
 {
@@ -313,6 +337,15 @@ fu_progressbar_update (FuProgressbar *self, FwupdStatus status, guint percentage
 	self->percentage = percentage;
 }
 
+/**
+ * fu_progressbar_set_interactive:
+ * @self: A #FuProgressbar
+ * @interactive: #gboolean
+ *
+ * Marks the progressbar as interactive or not
+ *
+ * Since: 0.9.7
+ **/
 void
 fu_progressbar_set_interactive (FuProgressbar *self, gboolean interactive)
 {
@@ -320,6 +353,15 @@ fu_progressbar_set_interactive (FuProgressbar *self, gboolean interactive)
 	self->interactive = interactive;
 }
 
+/**
+ * fu_progressbar_set_length_status:
+ * @self: A #FuProgressbar
+ * @len: unsigned integer
+ *
+ * Sets the length of the progressbar status
+ *
+ * Since: 0.9.7
+ **/
 void
 fu_progressbar_set_length_status (FuProgressbar *self, guint len)
 {
@@ -328,6 +370,15 @@ fu_progressbar_set_length_status (FuProgressbar *self, guint len)
 	self->length_status = len;
 }
 
+/**
+ * fu_progressbar_set_length_percentage:
+ * @self: A #FuProgressbar
+ * @len: unsigned integer
+ *
+ * Sets the length of the progressba percentage
+ *
+ * Since: 0.9.7
+ **/
 void
 fu_progressbar_set_length_percentage (FuProgressbar *self, guint len)
 {
@@ -365,6 +416,13 @@ fu_progressbar_finalize (GObject *obj)
 	G_OBJECT_CLASS (fu_progressbar_parent_class)->finalize (obj);
 }
 
+/**
+ * fu_progressbar_new:
+ *
+ * Creates a new #FuProgressbar
+ *
+ * Since: 0.9.7
+ **/
 FuProgressbar *
 fu_progressbar_new (void)
 {

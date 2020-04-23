@@ -99,6 +99,10 @@ FwupdDevice	*fwupd_client_get_device_by_id		(FwupdClient	*client,
 							 const gchar	*device_id,
 							 GCancellable	*cancellable,
 							 GError		**error);
+GPtrArray	*fwupd_client_get_devices_by_guid	(FwupdClient	*client,
+							 const gchar	*guid,
+							 GCancellable	*cancellable,
+							 GError		**error);
 gboolean	 fwupd_client_install			(FwupdClient	*client,
 							 const gchar	*device_id,
 							 const gchar	*filename,
@@ -125,8 +129,11 @@ gboolean	 fwupd_client_modify_device		(FwupdClient	*client,
 							 GError		**error);
 FwupdStatus	 fwupd_client_get_status		(FwupdClient	*client);
 gboolean	 fwupd_client_get_tainted		(FwupdClient	*client);
+gboolean	 fwupd_client_get_daemon_interactive	(FwupdClient	*client);
 guint		 fwupd_client_get_percentage		(FwupdClient	*client);
 const gchar	*fwupd_client_get_daemon_version	(FwupdClient	*client);
+const gchar	*fwupd_client_get_host_product		(FwupdClient	*client);
+const gchar	*fwupd_client_get_host_machine_id	(FwupdClient	*client);
 
 GPtrArray	*fwupd_client_get_remotes		(FwupdClient	*client,
 							 GCancellable	*cancellable,

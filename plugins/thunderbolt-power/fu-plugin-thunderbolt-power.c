@@ -12,18 +12,12 @@
 #include <glib/gstdio.h>
 
 #include "fu-plugin-vfuncs.h"
+#include "fu-hash.h"
 #include "fu-device-metadata.h"
 
 #define BOLT_DBUS_SERVICE	"org.freedesktop.bolt"
 #define BOLT_DBUS_PATH		"/org/freedesktop/bolt"
 #define BOLT_DBUS_INTERFACE	"org.freedesktop.bolt1.Power"
-
-#ifndef HAVE_GUDEV_232
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wunused-function"
-G_DEFINE_AUTOPTR_CLEANUP_FUNC(GUdevDevice, g_object_unref)
-#pragma clang diagnostic pop
-#endif
 
 /* empirically measured amount of time for the TBT device to come and go */
 #define TBT_NEW_DEVICE_TIMEOUT	2 /* s */
@@ -193,7 +187,7 @@ fu_plugin_thunderbolt_power_kernel_force_power (FuPlugin *plugin, gboolean enabl
 		return FALSE;
 	}
 	g_debug ("Setting force power to %d using kernel", enable);
-	fd = g_open (data->force_path, O_WRONLY);
+	fd = g_open (data->force_path, O_WRONLY, 0);
 	if (fd == -1) {
 		g_set_error (error,
 			     FWUPD_ERROR,
@@ -343,7 +337,9 @@ fu_plugin_device_registered (FuPlugin *plugin, FuDevice *device)
 {
 	FuPluginData *data = fu_plugin_get_data (plugin);
 
-	/* thunderbolt plugin */
+	/* We care only about the thunderbolt devices. NB: we don't care
+	 * about avoiding to auto-starting boltd here, because if there
+	 * is thunderbolt hardware present, boltd is already running */
 	if (g_strcmp0 (fu_device_get_plugin (device), "thunderbolt") == 0 &&
 	    (fu_plugin_thunderbolt_power_bolt_supported (plugin) ||
 	    fu_plugin_thunderbolt_power_kernel_supported (plugin))) {
@@ -431,12 +427,15 @@ fu_plugin_thunderbolt_power_coldplug (FuPlugin *plugin, GError **error)
 {
 	FuPluginData *data = fu_plugin_get_data (plugin);
 
-	if (!fu_plugin_thunderbolt_power_bolt_supported (plugin) &&
-	    !fu_plugin_thunderbolt_power_kernel_supported (plugin)) {
+	/* NB: we don't check for force-power support via bolt here
+	 * (although we later prefer that), because boltd uses the
+	 * same kernel interface and if that does not exist, we can
+	 * avoid pinging bolt, potentially auto-starting it. */
+	if (!fu_plugin_thunderbolt_power_kernel_supported (plugin)) {
 		g_set_error (error,
 			     FWUPD_ERROR,
 			     FWUPD_ERROR_NOT_SUPPORTED,
-			     "No support for force power via kernel or bolt");
+			     "No support for force power detected");
 		return FALSE;
 	}
 

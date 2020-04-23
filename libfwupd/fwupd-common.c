@@ -13,7 +13,9 @@
 
 #include <locale.h>
 #include <string.h>
+#ifdef HAVE_UTSNAME_H
 #include <sys/utsname.h>
+#endif
 #include <json-glib/json-glib.h>
 
 #if !GLIB_CHECK_VERSION(2,54,0)
@@ -150,6 +152,15 @@ fwupd_get_os_release (GError **error)
 	g_autofree gchar *buf = NULL;
 	g_auto(GStrv) lines = NULL;
 
+/* TODO: Read the Windows version */
+#ifdef _WIN32
+	hash = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
+	g_hash_table_insert (hash,
+			     g_strdup("OS"),
+			     g_strdup("Windows"));
+	return hash;
+#endif
+
 	/* find the correct file */
 	for (guint i = 0; paths[i] != NULL; i++) {
 		g_debug ("looking for os-release at %s", paths[i]);
@@ -222,12 +233,15 @@ fwupd_build_user_agent_os_release (void)
 static gchar *
 fwupd_build_user_agent_system (void)
 {
+#ifdef HAVE_UTSNAME_H
 	struct utsname name_tmp;
+#endif
 	g_autofree gchar *locale = NULL;
 	g_autofree gchar *os_release = NULL;
 	g_autoptr(GPtrArray) ids = g_ptr_array_new_with_free_func (g_free);
 
 	/* system, architecture and kernel, e.g. "Linux i686 4.14.5" */
+#ifdef HAVE_UTSNAME_H
 	memset (&name_tmp, 0, sizeof(struct utsname));
 	if (uname (&name_tmp) >= 0) {
 		g_ptr_array_add (ids, g_strdup_printf ("%s %s %s",
@@ -235,9 +249,12 @@ fwupd_build_user_agent_system (void)
 						       name_tmp.machine,
 						       name_tmp.release));
 	}
+#endif
 
 	/* current locale, e.g. "en-gb" */
+#ifdef HAVE_LC_MESSAGES
 	locale = g_strdup (setlocale (LC_MESSAGES, NULL));
+#endif
 	if (locale != NULL) {
 		g_strdelimit (locale, ".", '\0');
 		g_strdelimit (locale, "_", '-');
@@ -313,12 +330,31 @@ fwupd_build_user_agent (const gchar *package_name, const gchar *package_version)
 gchar *
 fwupd_build_machine_id (const gchar *salt, GError **error)
 {
+	const gchar *fn = NULL;
 	g_autofree gchar *buf = NULL;
+	g_auto(GStrv) fns = g_new0 (gchar *, 5);
 	g_autoptr(GChecksum) csum = NULL;
 	gsize sz = 0;
 
-	/* this has to exist */
-	if (!g_file_get_contents ("/etc/machine-id", &buf, &sz, error))
+	/* one of these has to exist */
+	fns[0] = g_build_filename (FWUPD_SYSCONFDIR, "machine-id", NULL);
+	fns[1] = g_build_filename (FWUPD_LOCALSTATEDIR, "lib", "dbus", "machine-id", NULL);
+	fns[2] = g_strdup ("/etc/machine-id");
+	fns[3] = g_strdup ("/var/lib/dbus/machine-id");
+	for (guint i = 0; fns[i] != NULL; i++) {
+		if (g_file_test (fns[i], G_FILE_TEST_EXISTS)) {
+			fn = fns[i];
+			break;
+		}
+	}
+	if (fn == NULL) {
+		g_set_error_literal (error,
+				     FWUPD_ERROR,
+				     FWUPD_ERROR_READ,
+				     "The machine-id is not present");
+		return NULL;
+	}
+	if (!g_file_get_contents (fn, &buf, &sz, error))
 		return NULL;
 	if (sz == 0) {
 		g_set_error_literal (error,
@@ -356,6 +392,7 @@ fwupd_build_history_report_json_device (JsonBuilder *builder, FwupdDevice *dev)
 {
 	FwupdRelease *rel = fwupd_device_get_release_default (dev);
 	GPtrArray *checksums;
+	GPtrArray *guids;
 
 	/* identify the firmware used */
 	json_builder_set_member_name (builder, "Checksum");
@@ -393,8 +430,16 @@ fwupd_build_history_report_json_device (JsonBuilder *builder, FwupdDevice *dev)
 	}
 
 	/* map back to the dev type on the LVFS */
-	json_builder_set_member_name (builder, "Guid");
-	json_builder_add_string_value (builder, fwupd_device_get_guid_default (dev));
+	guids = fwupd_device_get_guids (dev);
+	if (guids->len > 0) {
+		json_builder_set_member_name (builder, "Guid");
+		json_builder_begin_array (builder);
+		for (guint i = 0; i < guids->len; i++) {
+			const gchar *guid = g_ptr_array_index (guids, i);
+			json_builder_add_string_value (builder, guid);
+		}
+		json_builder_end_array (builder);
+	}
 
 	json_builder_set_member_name (builder, "Plugin");
 	json_builder_add_string_value (builder, fwupd_device_get_plugin (dev));
@@ -770,6 +815,34 @@ fwupd_guid_hash_data (const guint8 *data, gsize datasz, FwupdGuidFlags flags)
 	uu_new[6] = (guint8) ((uu_new[6] & 0x0f) | (5 << 4));
 	uu_new[8] = (guint8) ((uu_new[8] & 0x3f) | 0x80);
 	return fwupd_guid_to_string ((const fwupd_guid_t *) &uu_new, flags);
+}
+
+/**
+ * fwupd_device_id_is_valid:
+ * @device_id: string to check, e.g. `d3fae86d95e5d56626129d00e332c4b8dac95442`
+ *
+ * Checks the string is a valid non-partial device ID. It is important to note
+ * that the wildcard ID of `*` is not considered a valid ID in this function and
+ * the client must check for this manually if this should be allowed.
+ *
+ * Returns: %TRUE if @guid was a fwupd device ID, %FALSE otherwise
+ *
+ * Since: 1.4.1
+ **/
+gboolean
+fwupd_device_id_is_valid (const gchar *device_id)
+{
+	if (device_id == NULL)
+		return FALSE;
+	if (strlen (device_id) != 40)
+		return FALSE;
+	for (guint i = 0; device_id[i] != '\0'; i++) {
+		gchar tmp = device_id[i];
+		/* isalnum isn't case specific */
+		if ((tmp < 'a' || tmp > 'f') && (tmp < '0' || tmp > '9'))
+			return FALSE;
+	}
+	return TRUE;
 }
 
 /**

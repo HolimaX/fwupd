@@ -163,6 +163,38 @@ fwupd_device_flag_to_string (FwupdDeviceFlags device_flag)
 		return "needs-activation";
 	if (device_flag == FWUPD_DEVICE_FLAG_ENSURE_SEMVER)
 		return "ensure-semver";
+	if (device_flag == FWUPD_DEVICE_FLAG_HISTORICAL)
+		return "historical";
+	if (device_flag == FWUPD_DEVICE_FLAG_ONLY_SUPPORTED)
+		return "only-supported";
+	if (device_flag == FWUPD_DEVICE_FLAG_WILL_DISAPPEAR)
+		return "will-disappear";
+	if (device_flag == FWUPD_DEVICE_FLAG_CAN_VERIFY)
+		return "can-verify";
+	if (device_flag == FWUPD_DEVICE_FLAG_CAN_VERIFY_IMAGE)
+		return "can-verify-image";
+	if (device_flag == FWUPD_DEVICE_FLAG_DUAL_IMAGE)
+		return "dual-image";
+	if (device_flag == FWUPD_DEVICE_FLAG_SELF_RECOVERY)
+		return "self-recovery";
+	if (device_flag == FWUPD_DEVICE_FLAG_USABLE_DURING_UPDATE)
+		return "usable-during-update";
+	if (device_flag == FWUPD_DEVICE_FLAG_VERSION_CHECK_REQUIRED)
+		return "version-check-required";
+	if (device_flag == FWUPD_DEVICE_FLAG_INSTALL_ALL_RELEASES)
+		return "install-all-releases";
+	if (device_flag == FWUPD_DEVICE_FLAG_MD_SET_NAME)
+		return "md-set-name";
+	if (device_flag == FWUPD_DEVICE_FLAG_MD_SET_NAME_CATEGORY)
+		return "md-set-name-category";
+	if (device_flag == FWUPD_DEVICE_FLAG_MD_SET_VERFMT)
+		return "md-set-verfmt";
+	if (device_flag == FWUPD_DEVICE_FLAG_ADD_COUNTERPART_GUIDS)
+		return "add-counterpart-guids";
+	if (device_flag == FWUPD_DEVICE_FLAG_NO_GUID_MATCHING)
+		return "no-guid-matching";
+	if (device_flag == FWUPD_DEVICE_FLAG_UPDATABLE_HIDDEN)
+		return "updatable-hidden";
 	if (device_flag == FWUPD_DEVICE_FLAG_UNKNOWN)
 		return "unknown";
 	return NULL;
@@ -227,6 +259,38 @@ fwupd_device_flag_from_string (const gchar *device_flag)
 		return FWUPD_DEVICE_FLAG_NEEDS_ACTIVATION;
 	if (g_strcmp0 (device_flag, "ensure-semver") == 0)
 		return FWUPD_DEVICE_FLAG_ENSURE_SEMVER;
+	if (g_strcmp0 (device_flag, "historical") == 0)
+		return FWUPD_DEVICE_FLAG_HISTORICAL;
+	if (g_strcmp0 (device_flag, "only-supported") == 0)
+		return FWUPD_DEVICE_FLAG_ONLY_SUPPORTED;
+	if (g_strcmp0 (device_flag, "will-disappear") == 0)
+		return FWUPD_DEVICE_FLAG_WILL_DISAPPEAR;
+	if (g_strcmp0 (device_flag, "can-verify") == 0)
+		return FWUPD_DEVICE_FLAG_CAN_VERIFY;
+	if (g_strcmp0 (device_flag, "can-verify-image") == 0)
+		return FWUPD_DEVICE_FLAG_CAN_VERIFY_IMAGE;
+	if (g_strcmp0 (device_flag, "dual-image") == 0)
+		return FWUPD_DEVICE_FLAG_DUAL_IMAGE;
+	if (g_strcmp0 (device_flag, "self-recovery") == 0)
+		return FWUPD_DEVICE_FLAG_SELF_RECOVERY;
+	if (g_strcmp0 (device_flag, "usable-during-update") == 0)
+		return FWUPD_DEVICE_FLAG_USABLE_DURING_UPDATE;
+	if (g_strcmp0 (device_flag, "version-check-required") == 0)
+		return FWUPD_DEVICE_FLAG_VERSION_CHECK_REQUIRED;
+	if (g_strcmp0 (device_flag, "install-all-releases") == 0)
+		return FWUPD_DEVICE_FLAG_INSTALL_ALL_RELEASES;
+	if (g_strcmp0 (device_flag, "md-set-name") == 0)
+		return FWUPD_DEVICE_FLAG_MD_SET_NAME;
+	if (g_strcmp0 (device_flag, "md-set-name-category") == 0)
+		return FWUPD_DEVICE_FLAG_MD_SET_NAME_CATEGORY;
+	if (g_strcmp0 (device_flag, "md-set-verfmt") == 0)
+		return FWUPD_DEVICE_FLAG_MD_SET_VERFMT;
+	if (g_strcmp0 (device_flag, "add-counterpart-guids") == 0)
+		return FWUPD_DEVICE_FLAG_ADD_COUNTERPART_GUIDS;
+	if (g_strcmp0 (device_flag, "no-guid-matching") == 0)
+		return FWUPD_DEVICE_FLAG_NO_GUID_MATCHING;
+	if (g_strcmp0 (device_flag, "updatable-hidden") == 0)
+		return FWUPD_DEVICE_FLAG_UPDATABLE_HIDDEN;
 	return FWUPD_DEVICE_FLAG_UNKNOWN;
 }
 
@@ -349,6 +413,8 @@ fwupd_keyring_kind_from_string (const gchar *keyring_kind)
 		return FWUPD_KEYRING_KIND_GPG;
 	if (g_strcmp0 (keyring_kind, "pkcs7") == 0)
 		return FWUPD_KEYRING_KIND_PKCS7;
+	if (g_strcmp0 (keyring_kind, "jcat") == 0)
+		return FWUPD_KEYRING_KIND_JCAT;
 	return FWUPD_KEYRING_KIND_UNKNOWN;
 }
 
@@ -371,6 +437,8 @@ fwupd_keyring_kind_to_string (FwupdKeyringKind keyring_kind)
 		return "gpg";
 	if (keyring_kind == FWUPD_KEYRING_KIND_PKCS7)
 		return "pkcs7";
+	if (keyring_kind == FWUPD_KEYRING_KIND_JCAT)
+		return "jcat";
 	return NULL;
 }
 
@@ -433,6 +501,54 @@ fwupd_release_flag_from_string (const gchar *release_flag)
 }
 
 /**
+ * fwupd_release_urgency_to_string:
+ * @release_urgency: A #FwupdReleaseUrgency, e.g. %FWUPD_RELEASE_URGENCY_HIGH
+ *
+ * Converts an enumerated value to a string.
+ *
+ * Return value: identifier string
+ *
+ * Since: 1.4.0
+ **/
+const gchar *
+fwupd_release_urgency_to_string (FwupdReleaseUrgency release_urgency)
+{
+	if (release_urgency == FWUPD_RELEASE_URGENCY_LOW)
+		return "low";
+	if (release_urgency == FWUPD_RELEASE_URGENCY_MEDIUM)
+		return "medium";
+	if (release_urgency == FWUPD_RELEASE_URGENCY_HIGH)
+		return "high";
+	if (release_urgency == FWUPD_RELEASE_URGENCY_CRITICAL)
+		return "critical";
+	return NULL;
+}
+
+/**
+ * fwupd_release_urgency_from_string:
+ * @release_urgency: A string, e.g. `trusted-payload`
+ *
+ * Converts a string to an enumerated value.
+ *
+ * Return value: enumerated value
+ *
+ * Since: 1.4.0
+ **/
+FwupdReleaseUrgency
+fwupd_release_urgency_from_string (const gchar *release_urgency)
+{
+	if (g_strcmp0 (release_urgency, "low") == 0)
+		return FWUPD_RELEASE_URGENCY_LOW;
+	if (g_strcmp0 (release_urgency, "medium") == 0)
+		return FWUPD_RELEASE_URGENCY_MEDIUM;
+	if (g_strcmp0 (release_urgency, "high") == 0)
+		return FWUPD_RELEASE_URGENCY_HIGH;
+	if (g_strcmp0 (release_urgency, "critical") == 0)
+		return FWUPD_RELEASE_URGENCY_CRITICAL;
+	return FWUPD_RELEASE_URGENCY_UNKNOWN;
+}
+
+/**
  * fwupd_version_format_from_string:
  * @str: A string, e.g. `quad`
  *
@@ -461,6 +577,14 @@ fwupd_version_format_from_string (const gchar *str)
 		return FWUPD_VERSION_FORMAT_INTEL_ME;
 	if (g_strcmp0 (str, "intel-me2") == 0)
 		return FWUPD_VERSION_FORMAT_INTEL_ME2;
+	if (g_strcmp0 (str, "surface-legacy") == 0)
+		return FWUPD_VERSION_FORMAT_SURFACE_LEGACY;
+	if (g_strcmp0 (str, "surface") == 0)
+		return FWUPD_VERSION_FORMAT_SURFACE;
+	if (g_strcmp0 (str, "dell-bios") == 0)
+		return FWUPD_VERSION_FORMAT_DELL_BIOS;
+	if (g_strcmp0 (str, "hex") == 0)
+		return FWUPD_VERSION_FORMAT_HEX;
 	return FWUPD_VERSION_FORMAT_UNKNOWN;
 }
 
@@ -493,5 +617,13 @@ fwupd_version_format_to_string (FwupdVersionFormat kind)
 		return "intel-me";
 	if (kind == FWUPD_VERSION_FORMAT_INTEL_ME2)
 		return "intel-me2";
+	if (kind == FWUPD_VERSION_FORMAT_SURFACE_LEGACY)
+		return "surface-legacy";
+	if (kind == FWUPD_VERSION_FORMAT_SURFACE)
+		return "surface";
+	if (kind == FWUPD_VERSION_FORMAT_DELL_BIOS)
+		return "dell-bios";
+	if (kind == FWUPD_VERSION_FORMAT_HEX)
+		return "hex";
 	return NULL;
 }

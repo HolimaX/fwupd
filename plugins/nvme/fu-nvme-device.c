@@ -6,15 +6,7 @@
 
 #include "config.h"
 
-#include <fcntl.h>
-#include <string.h>
-#include <sys/errno.h>
 #include <sys/ioctl.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-
-#include <glib/gstdio.h>
-
 #include <linux/nvme_ioctl.h>
 
 #include "fu-chunk.h"
@@ -26,24 +18,15 @@
 struct _FuNvmeDevice {
 	FuUdevDevice		 parent_instance;
 	guint			 pci_depth;
-	gint			 fd;
 	guint64			 write_block_size;
 };
 
 G_DEFINE_TYPE (FuNvmeDevice, fu_nvme_device, FU_TYPE_UDEV_DEVICE)
 
-#ifndef HAVE_GUDEV_232
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wunused-function"
-G_DEFINE_AUTOPTR_CLEANUP_FUNC(GUdevDevice, g_object_unref)
-#pragma clang diagnostic pop
-#endif
-
 static void
 fu_nvme_device_to_string (FuDevice *device, guint idt, GString *str)
 {
 	FuNvmeDevice *self = FU_NVME_DEVICE (device);
-	fu_common_string_append_ku (str, idt, "FD", (guint) self->fd);
 	fu_common_string_append_ku (str, idt, "PciDepth", self->pci_depth);
 }
 
@@ -86,18 +69,16 @@ fu_nvme_device_get_guid_safe (const guint8 *buf, guint16 addr_start)
 static gboolean
 fu_nvme_device_submit_admin_passthru (FuNvmeDevice *self, struct nvme_admin_cmd *cmd, GError **error)
 {
-	gint rc;
+	gint rc = 0;
 	guint32 err;
 
 	/* submit admin command */
-	rc = ioctl (self->fd, NVME_IOCTL_ADMIN_CMD, cmd);
-	if (rc < 0) {
-		g_set_error (error,
-			     G_IO_ERROR,
-			     G_IO_ERROR_FAILED,
-			     "failed to issue admin command 0x%02x: %s",
-			     cmd->opcode,
-			     strerror (errno));
+	if (!fu_udev_device_ioctl (FU_UDEV_DEVICE (self),
+				   NVME_IOCTL_ADMIN_CMD, (guint8 *) cmd,
+				   &rc, error)) {
+		g_prefix_error (error,
+				"failed to issue admin command 0x%02x: ",
+				cmd->opcode);
 		return FALSE;
 	}
 
@@ -203,43 +184,6 @@ fu_nvme_device_parse_cns_maybe_dell (FuNvmeDevice *self, const guint8 *buf)
 }
 
 static gboolean
-fu_nvme_device_set_version (FuNvmeDevice *self, const gchar *version, GError **error)
-{
-	FwupdVersionFormat fmt = fu_device_get_version_format (FU_DEVICE (self));
-
-	/* unset */
-	if (fmt == FWUPD_VERSION_FORMAT_UNKNOWN || fmt == FWUPD_VERSION_FORMAT_PLAIN) {
-		fu_device_set_version (FU_DEVICE (self), version, FWUPD_VERSION_FORMAT_PLAIN);
-		return TRUE;
-	}
-
-	/* AA.BB.CC.DD */
-	if (fmt == FWUPD_VERSION_FORMAT_QUAD) {
-		guint64 tmp = g_ascii_strtoull (version, NULL, 16);
-		g_autofree gchar *version_new = NULL;
-		if (tmp == 0 || tmp > G_MAXUINT32) {
-			g_set_error (error,
-				     G_IO_ERROR,
-				     G_IO_ERROR_INVALID_DATA,
-				     "%s is not valid 32 bit number",
-				     version);
-			return FALSE;
-		}
-		version_new = fu_common_version_from_uint32 (tmp, FWUPD_VERSION_FORMAT_QUAD);
-		fu_device_set_version (FU_DEVICE (self), version_new, fmt);
-		return TRUE;
-	}
-
-	/* invalid, or not supported */
-	g_set_error (error,
-		     G_IO_ERROR,
-		     G_IO_ERROR_INVALID_DATA,
-		     "version format %s not handled",
-		     fwupd_version_format_to_string (fmt));
-	return FALSE;
-}
-
-static gboolean
 fu_nvme_device_parse_cns (FuNvmeDevice *self, const guint8 *buf, gsize sz, GError **error)
 {
 	guint8 fawr;
@@ -270,10 +214,8 @@ fu_nvme_device_parse_cns (FuNvmeDevice *self, const guint8 *buf, gsize sz, GErro
 	if (mn != NULL)
 		fu_device_set_name (FU_DEVICE (self), mn);
 	sr = fu_nvme_device_get_string_safe (buf, 64, 71);
-	if (sr != NULL) {
-		if (!fu_nvme_device_set_version (self, sr, error))
-			return FALSE;
-	}
+	if (sr != NULL)
+		fu_device_set_version (FU_DEVICE (self), sr);
 
 	/* firmware update granularity (FWUG) */
 	fwug = buf[319];
@@ -319,28 +261,6 @@ fu_nvme_device_dump (const gchar *title, const guint8 *buf, gsize sz)
 }
 
 static gboolean
-fu_nvme_device_open (FuDevice *device, GError **error)
-{
-	FuNvmeDevice *self = FU_NVME_DEVICE (device);
-	GUdevDevice *udev_device = fu_udev_device_get_dev (FU_UDEV_DEVICE (device));
-
-	/* open device */
-	self->fd = g_open (g_udev_device_get_device_file (udev_device), O_RDONLY);
-	if (self->fd < 0) {
-		g_set_error (error,
-			     G_IO_ERROR,
-			     G_IO_ERROR_FAILED,
-			     "failed to open %s: %s",
-			     g_udev_device_get_device_file (udev_device),
-			     strerror (errno));
-		return FALSE;
-	}
-
-	/* success */
-	return TRUE;
-}
-
-static gboolean
 fu_nvme_device_probe (FuUdevDevice *device, GError **error)
 {
 	FuNvmeDevice *self = FU_NVME_DEVICE (device);
@@ -351,8 +271,10 @@ fu_nvme_device_probe (FuUdevDevice *device, GError **error)
 
 	/* look at the PCI depth to work out if in an external enclosure */
 	self->pci_depth = fu_udev_device_get_slot_depth (device, "pci");
-	if (self->pci_depth <= 2)
+	if (self->pci_depth <= 2) {
 		fu_device_add_flag (FU_DEVICE (self), FWUPD_DEVICE_FLAG_INTERNAL);
+		fu_device_add_flag (FU_DEVICE (self), FWUPD_DEVICE_FLAG_USABLE_DURING_UPDATE);
+	}
 
 	/* all devices need at least a warm reset, but some quirked drives
 	 * need a full "cold" shutdown and startup */
@@ -379,16 +301,6 @@ fu_nvme_device_setup (FuDevice *device, GError **error)
 		return FALSE;
 
 	/* success */
-	return TRUE;
-}
-
-static gboolean
-fu_nvme_device_close (FuDevice *device, GError **error)
-{
-	FuNvmeDevice *self = FU_NVME_DEVICE (device);
-	if (!g_close (self->fd, error))
-		return FALSE;
-	self->fd = 0;
 	return TRUE;
 }
 
@@ -478,8 +390,13 @@ fu_nvme_device_init (FuNvmeDevice *self)
 {
 	fu_device_add_flag (FU_DEVICE (self), FWUPD_DEVICE_FLAG_REQUIRE_AC);
 	fu_device_add_flag (FU_DEVICE (self), FWUPD_DEVICE_FLAG_UPDATABLE);
+	fu_device_set_version_format (FU_DEVICE (self), FWUPD_VERSION_FORMAT_PLAIN);
 	fu_device_set_summary (FU_DEVICE (self), "NVM Express Solid State Drive");
 	fu_device_add_icon (FU_DEVICE (self), "drive-harddisk");
+	fu_device_set_protocol (FU_DEVICE (self), "org.nvmexpress");
+	fu_udev_device_set_flags (FU_UDEV_DEVICE (self),
+				  FU_UDEV_DEVICE_FLAG_OPEN_READ |
+				  FU_UDEV_DEVICE_FLAG_VENDOR_FROM_PARENT);
 }
 
 static void
@@ -497,19 +414,9 @@ fu_nvme_device_class_init (FuNvmeDeviceClass *klass)
 	object_class->finalize = fu_nvme_device_finalize;
 	klass_device->to_string = fu_nvme_device_to_string;
 	klass_device->set_quirk_kv = fu_nvme_device_set_quirk_kv;
-	klass_device->open = fu_nvme_device_open;
 	klass_device->setup = fu_nvme_device_setup;
-	klass_device->close = fu_nvme_device_close;
 	klass_device->write_firmware = fu_nvme_device_write_firmware;
 	klass_udev_device->probe = fu_nvme_device_probe;
-}
-
-FuNvmeDevice *
-fu_nvme_device_new (FuUdevDevice *device)
-{
-	FuNvmeDevice *self = g_object_new (FU_TYPE_NVME_DEVICE, NULL);
-	fu_device_incorporate (FU_DEVICE (self), FU_DEVICE (device));
-	return self;
 }
 
 FuNvmeDevice *

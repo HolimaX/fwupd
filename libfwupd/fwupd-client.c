@@ -8,7 +8,9 @@
 
 #include <glib-object.h>
 #include <gio/gio.h>
+#ifdef HAVE_GIO_UNIX
 #include <gio/gunixfdlist.h>
+#endif
 
 #include <fcntl.h>
 #include <string.h>
@@ -38,8 +40,11 @@ static void fwupd_client_finalize	 (GObject *object);
 typedef struct {
 	FwupdStatus			 status;
 	gboolean			 tainted;
+	gboolean			 interactive;
 	guint				 percentage;
 	gchar				*daemon_version;
+	gchar				*host_product;
+	gchar				*host_machine_id;
 	GDBusConnection			*conn;
 	GDBusProxy			*proxy;
 } FwupdClientPrivate;
@@ -59,6 +64,9 @@ enum {
 	PROP_PERCENTAGE,
 	PROP_DAEMON_VERSION,
 	PROP_TAINTED,
+	PROP_HOST_PRODUCT,
+	PROP_HOST_MACHINE_ID,
+	PROP_INTERACTIVE,
 	PROP_LAST
 };
 
@@ -103,6 +111,24 @@ G_DEFINE_AUTOPTR_CLEANUP_FUNC(FwupdClientHelper, fwupd_client_helper_free)
 #pragma clang diagnostic pop
 
 static void
+fwupd_client_set_host_product (FwupdClient *client, const gchar *host_product)
+{
+	FwupdClientPrivate *priv = GET_PRIVATE (client);
+	g_free (priv->host_product);
+	priv->host_product = g_strdup (host_product);
+	g_object_notify (G_OBJECT (client), "host-product");
+}
+
+static void
+fwupd_client_set_host_machine_id (FwupdClient *client, const gchar *host_machine_id)
+{
+	FwupdClientPrivate *priv = GET_PRIVATE (client);
+	g_free (priv->host_machine_id);
+	priv->host_machine_id = g_strdup (host_machine_id);
+	g_object_notify (G_OBJECT (client), "host-machine-id");
+}
+
+static void
 fwupd_client_set_daemon_version (FwupdClient *client, const gchar *daemon_version)
 {
 	FwupdClientPrivate *priv = GET_PRIVATE (client);
@@ -141,6 +167,14 @@ fwupd_client_properties_changed_cb (GDBusProxy *proxy,
 			g_object_notify (G_OBJECT (client), "tainted");
 		}
 	}
+	if (g_variant_dict_contains (dict, "Interactive")) {
+		g_autoptr(GVariant) val = NULL;
+		val = g_dbus_proxy_get_cached_property (proxy, "Interactive");
+		if (val != NULL) {
+			priv->interactive = g_variant_get_boolean (val);
+			g_object_notify (G_OBJECT (client), "interactive");
+		}
+	}
 	if (g_variant_dict_contains (dict, "Percentage")) {
 		g_autoptr(GVariant) val = NULL;
 		val = g_dbus_proxy_get_cached_property (proxy, "Percentage");
@@ -154,6 +188,18 @@ fwupd_client_properties_changed_cb (GDBusProxy *proxy,
 		val = g_dbus_proxy_get_cached_property (proxy, "DaemonVersion");
 		if (val != NULL)
 			fwupd_client_set_daemon_version (client, g_variant_get_string (val, NULL));
+	}
+	if (g_variant_dict_contains (dict, "HostProduct")) {
+		g_autoptr(GVariant) val = NULL;
+		val = g_dbus_proxy_get_cached_property (proxy, "HostProduct");
+		if (val != NULL)
+			fwupd_client_set_host_product (client, g_variant_get_string (val, NULL));
+	}
+	if (g_variant_dict_contains (dict, "HostMachineId")) {
+		g_autoptr(GVariant) val = NULL;
+		val = g_dbus_proxy_get_cached_property (proxy, "HostMachineId");
+		if (val != NULL)
+			fwupd_client_set_host_machine_id (client, g_variant_get_string (val, NULL));
 	}
 }
 
@@ -249,6 +295,16 @@ fwupd_client_connect (FwupdClient *client, GCancellable *cancellable, GError **e
 	val2 = g_dbus_proxy_get_cached_property (priv->proxy, "Tainted");
 	if (val2 != NULL)
 		priv->tainted = g_variant_get_boolean (val2);
+	val2 = g_dbus_proxy_get_cached_property (priv->proxy, "Interactive");
+	if (val2 != NULL)
+		priv->interactive = g_variant_get_boolean (val2);
+	val = g_dbus_proxy_get_cached_property (priv->proxy, "HostProduct");
+	if (val != NULL)
+		fwupd_client_set_host_product (client, g_variant_get_string (val, NULL));
+	val = g_dbus_proxy_get_cached_property (priv->proxy, "HostMachineId");
+	if (val != NULL)
+		fwupd_client_set_host_machine_id (client, g_variant_get_string (val, NULL));
+
 	return TRUE;
 }
 
@@ -411,6 +467,60 @@ fwupd_client_get_device_by_id (FwupdClient *client,
 		     FWUPD_ERROR_NOT_FOUND,
 		     "failed to find %s", device_id);
 	return NULL;
+}
+
+/**
+ * fwupd_client_get_devices_by_guid:
+ * @client: A #FwupdClient
+ * @guid: the GUID, e.g. `e22c4520-43dc-5bb3-8245-5787fead9b63`
+ * @cancellable: the #GCancellable, or %NULL
+ * @error: the #GError, or %NULL
+ *
+ * Gets any devices that provide a specific GUID. An error is returned if no
+ * devices contains this GUID.
+ *
+ * Returns: (element-type FwupdDevice) (transfer container): devices or %NULL
+ *
+ * Since: 1.4.1
+ **/
+GPtrArray *
+fwupd_client_get_devices_by_guid (FwupdClient *client,
+				  const gchar *guid,
+				  GCancellable *cancellable,
+				  GError **error)
+{
+	g_autoptr(GPtrArray) devices = NULL;
+	g_autoptr(GPtrArray) devices_tmp = NULL;
+
+	g_return_val_if_fail (FWUPD_IS_CLIENT (client), NULL);
+	g_return_val_if_fail (guid != NULL, NULL);
+	g_return_val_if_fail (cancellable == NULL || G_IS_CANCELLABLE (cancellable), NULL);
+	g_return_val_if_fail (error == NULL || *error == NULL, NULL);
+
+	/* get all the devices */
+	devices_tmp = fwupd_client_get_devices (client, cancellable, error);
+	if (devices_tmp == NULL)
+		return NULL;
+
+	/* find the devices by GUID (client side) */
+	devices = g_ptr_array_new_with_free_func ((GDestroyNotify) g_object_unref);
+	for (guint i = 0; i < devices_tmp->len; i++) {
+		FwupdDevice *dev_tmp = g_ptr_array_index (devices_tmp, i);
+		if (fwupd_device_has_guid (dev_tmp, guid))
+			g_ptr_array_add (devices, g_object_ref (dev_tmp));
+	}
+
+	/* nothing */
+	if (devices->len == 0) {
+		g_set_error (error,
+			     FWUPD_ERROR,
+			     FWUPD_ERROR_NOT_FOUND,
+			     "failed to find any device providing %s", guid);
+		return NULL;
+	}
+
+	/* success */
+	return g_steal_pointer (&devices);
 }
 
 /**
@@ -899,6 +1009,7 @@ fwupd_client_get_results (FwupdClient *client, const gchar *device_id,
 	return fwupd_device_from_variant (helper->val);
 }
 
+#ifdef HAVE_GIO_UNIX
 static void
 fwupd_client_send_message_cb (GObject *source_object, GAsyncResult *res, gpointer user_data)
 {
@@ -917,6 +1028,7 @@ fwupd_client_send_message_cb (GObject *source_object, GAsyncResult *res, gpointe
 		fwupd_client_fixup_dbus_error (helper->error);
 	g_main_loop_quit (helper->loop);
 }
+#endif
 
 /**
  * fwupd_client_install:
@@ -941,6 +1053,7 @@ fwupd_client_install (FwupdClient *client,
 		      GCancellable *cancellable,
 		      GError **error)
 {
+#ifdef HAVE_GIO_UNIX
 	FwupdClientPrivate *priv = GET_PRIVATE (client);
 	GVariant *body;
 	GVariantBuilder builder;
@@ -1030,6 +1143,13 @@ fwupd_client_install (FwupdClient *client,
 		return FALSE;
 	}
 	return TRUE;
+#else
+	g_set_error_literal (error,
+			     FWUPD_ERROR,
+			     FWUPD_ERROR_NOT_SUPPORTED,
+			     "Not supported as <glib-unix.h> is unavailable");
+	return FALSE;
+#endif
 }
 
 /**
@@ -1049,6 +1169,7 @@ GPtrArray *
 fwupd_client_get_details (FwupdClient *client, const gchar *filename,
 			  GCancellable *cancellable, GError **error)
 {
+#ifdef HAVE_GIO_UNIX
 	FwupdClientPrivate *priv = GET_PRIVATE (client);
 	GVariant *body;
 	gint fd;
@@ -1112,6 +1233,13 @@ fwupd_client_get_details (FwupdClient *client, const gchar *filename,
 
 	/* return results */
 	return fwupd_device_array_from_variant (helper->val);
+#else
+	g_set_error_literal (error,
+			     FWUPD_ERROR,
+			     FWUPD_ERROR_NOT_SUPPORTED,
+			     "Not supported as <glib-unix.h> is unavailable");
+	return NULL;
+#endif
 }
 
 /**
@@ -1151,6 +1279,42 @@ fwupd_client_get_daemon_version (FwupdClient *client)
 }
 
 /**
+ * fwupd_client_get_host_product:
+ * @client: A #FwupdClient
+ *
+ * Gets the string that represents the host running fwupd
+ *
+ * Returns: a string, or %NULL for unknown.
+ *
+ * Since: 1.3.1
+ **/
+const gchar *
+fwupd_client_get_host_product (FwupdClient *client)
+{
+	FwupdClientPrivate *priv = GET_PRIVATE (client);
+	g_return_val_if_fail (FWUPD_IS_CLIENT (client), NULL);
+	return priv->host_product;
+}
+
+/**
+ * fwupd_client_get_host_machine_id:
+ * @client: A #FwupdClient
+ *
+ * Gets the string that represents the host machine ID
+ *
+ * Returns: a string, or %NULL for unknown.
+ *
+ * Since: 1.3.2
+ **/
+const gchar *
+fwupd_client_get_host_machine_id (FwupdClient *client)
+{
+	FwupdClientPrivate *priv = GET_PRIVATE (client);
+	g_return_val_if_fail (FWUPD_IS_CLIENT (client), NULL);
+	return priv->host_machine_id;
+}
+
+/**
  * fwupd_client_get_status:
  * @client: A #FwupdClient
  *
@@ -1186,6 +1350,25 @@ fwupd_client_get_tainted (FwupdClient *client)
 	return priv->tainted;
 }
 
+
+/**
+ * fwupd_client_get_daemon_interactive:
+ * @client: A #FwupdClient
+ *
+ * Gets if the daemon is running in an interactive terminal.
+ *
+ * Returns: %TRUE if the daemon is running in an interactive terminal
+ *
+ * Since: 1.3.4
+ **/
+gboolean
+fwupd_client_get_daemon_interactive (FwupdClient *client)
+{
+	FwupdClientPrivate *priv = GET_PRIVATE (client);
+	g_return_val_if_fail (FWUPD_IS_CLIENT (client), FALSE);
+	return priv->interactive;
+}
+
 /**
  * fwupd_client_update_metadata:
  * @client: A #FwupdClient
@@ -1214,6 +1397,7 @@ fwupd_client_update_metadata (FwupdClient *client,
 			      GCancellable *cancellable,
 			      GError **error)
 {
+#ifdef HAVE_GIO_UNIX
 	FwupdClientPrivate *priv = GET_PRIVATE (client);
 	GVariant *body;
 	gint fd;
@@ -1287,6 +1471,13 @@ fwupd_client_update_metadata (FwupdClient *client,
 		return FALSE;
 	}
 	return TRUE;
+#else
+	g_set_error_literal (error,
+			     FWUPD_ERROR,
+			     FWUPD_ERROR_NOT_SUPPORTED,
+			     "Not supported as <glib-unix.h> is unavailable");
+	return FALSE;
+#endif
 }
 
 /**
@@ -1672,6 +1863,15 @@ fwupd_client_get_property (GObject *object, guint prop_id,
 	case PROP_DAEMON_VERSION:
 		g_value_set_string (value, priv->daemon_version);
 		break;
+	case PROP_HOST_PRODUCT:
+		g_value_set_string (value, priv->host_product);
+		break;
+	case PROP_HOST_MACHINE_ID:
+		g_value_set_string (value, priv->host_machine_id);
+		break;
+	case PROP_INTERACTIVE:
+		g_value_set_boolean (value, priv->interactive);
+		break;
 	default:
 		G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
 		break;
@@ -1815,6 +2015,17 @@ fwupd_client_class_init (FwupdClientClass *klass)
 	g_object_class_install_property (object_class, PROP_TAINTED, pspec);
 
 	/**
+	 * FwupdClient:interactive:
+	 *
+	 * If the daemon is running in an interactive terminal
+	 *
+	 * Since: 1.3.4
+	 */
+	pspec = g_param_spec_boolean ("interactive", NULL, NULL, FALSE,
+				      G_PARAM_READABLE | G_PARAM_STATIC_NAME);
+	g_object_class_install_property (object_class, PROP_INTERACTIVE, pspec);
+
+	/**
 	 * FwupdClient:percentage:
 	 *
 	 * The last-reported percentage of the daemon.
@@ -1836,6 +2047,28 @@ fwupd_client_class_init (FwupdClientClass *klass)
 	pspec = g_param_spec_string ("daemon-version", NULL, NULL,
 				     NULL, G_PARAM_READABLE | G_PARAM_STATIC_NAME);
 	g_object_class_install_property (object_class, PROP_DAEMON_VERSION, pspec);
+
+	/**
+	 * FwupdClient:host-product:
+	 *
+	 * The host product string
+	 *
+	 * Since: 1.3.1
+	 */
+	pspec = g_param_spec_string ("host-product", NULL, NULL,
+				     NULL, G_PARAM_READABLE | G_PARAM_STATIC_NAME);
+	g_object_class_install_property (object_class, PROP_HOST_PRODUCT, pspec);
+
+	/**
+	 * FwupdClient:host-machine-id:
+	 *
+	 * The host machine-id string
+	 *
+	 * Since: 1.3.2
+	 */
+	pspec = g_param_spec_string ("host-machine-id", NULL, NULL,
+				     NULL, G_PARAM_READABLE | G_PARAM_STATIC_NAME);
+	g_object_class_install_property (object_class, PROP_HOST_MACHINE_ID, pspec);
 }
 
 static void
@@ -1850,6 +2083,8 @@ fwupd_client_finalize (GObject *object)
 	FwupdClientPrivate *priv = GET_PRIVATE (client);
 
 	g_free (priv->daemon_version);
+	g_free (priv->host_product);
+	g_free (priv->host_machine_id);
 	if (priv->conn != NULL)
 		g_object_unref (priv->conn);
 	if (priv->proxy != NULL)

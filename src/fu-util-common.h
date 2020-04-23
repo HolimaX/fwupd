@@ -10,8 +10,6 @@
 #include <fwupd.h>
 #include <libsoup/soup.h>
 
-G_BEGIN_DECLS
-
 /* this is only valid for tools */
 #define FWUPD_ERROR_INVALID_ARGS        (FWUPD_ERROR_LAST+1)
 
@@ -35,11 +33,13 @@ void		 fu_util_print_tree		(GNode *n,	gpointer data);
 gboolean	 fu_util_is_interesting_device	(FwupdDevice	*dev);
 gchar		*fu_util_get_user_cache_path	(const gchar	*fn);
 SoupSession	*fu_util_setup_networking	(GError		**error);
-
 gchar		*fu_util_get_versions		(void);
 
 void		 fu_util_warning_box		(const gchar	*str,
 						 guint		 width);
+gboolean	fu_util_prompt_warning		(FwupdDevice	*device,
+						 const gchar	*machine,
+						 GError		**error);
 gboolean	fu_util_prompt_complete		(FwupdDeviceFlags flags,
 						 gboolean prompt,
 						 GError **error);
@@ -69,11 +69,11 @@ gboolean	 fu_util_parse_filter_flags	(const gchar *filter,
 						 GError **error);
 gchar		*fu_util_convert_description	(const gchar	*xml,
 						 GError		**error);
+gchar		*fu_util_time_to_str		(guint64	 tmp);
+
 gchar		*fu_util_device_to_string	(FwupdDevice	*dev,
 						 guint		 idt);
 gchar		*fu_util_release_to_string	(FwupdRelease	*rel,
 						 guint		 idt);
 gchar		*fu_util_remote_to_string	(FwupdRemote *remote,
 						 guint		 idt);
-
-G_END_DECLS

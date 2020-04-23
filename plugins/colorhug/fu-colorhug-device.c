@@ -137,10 +137,13 @@ fu_colorhug_device_msg (FuColorhugDevice *self, guint8 cmd,
 
 	/* check error code */
 	if (buf[0] != CH_ERROR_NONE) {
+		const gchar *msg = ch_strerror (buf[0]);
+		if (msg == NULL)
+			msg = "unknown error";
 		g_set_error_literal (error,
 				     FWUPD_ERROR,
 				     FWUPD_ERROR_INTERNAL,
-				     ch_strerror (buf[0]));
+				     msg);
 		return FALSE;
 	}
 
@@ -170,6 +173,12 @@ fu_colorhug_device_detach (FuDevice *device, GError **error)
 	FuColorhugDevice *self = FU_COLORHUG_DEVICE (device);
 	g_autoptr(GError) error_local = NULL;
 
+	/* sanity check */
+	if (fu_device_has_flag (device, FWUPD_DEVICE_FLAG_IS_BOOTLOADER)) {
+		g_debug ("already in bootloader mode, skipping");
+		return TRUE;
+	}
+
 	fu_device_set_status (device, FWUPD_STATUS_DEVICE_RESTART);
 	if (!fu_colorhug_device_msg (self, CH_CMD_RESET,
 				     NULL, 0, /* in */
@@ -182,6 +191,7 @@ fu_colorhug_device_detach (FuDevice *device, GError **error)
 			     error_local->message);
 		return FALSE;
 	}
+	fu_device_add_flag (device, FWUPD_DEVICE_FLAG_WAIT_FOR_REPLUG);
 	return TRUE;
 }
 
@@ -190,6 +200,12 @@ fu_colorhug_device_attach (FuDevice *device, GError **error)
 {
 	FuColorhugDevice *self = FU_COLORHUG_DEVICE (device);
 	g_autoptr(GError) error_local = NULL;
+
+	/* sanity check */
+	if (!fu_device_has_flag (device, FWUPD_DEVICE_FLAG_IS_BOOTLOADER)) {
+		g_debug ("already in runtime mode, skipping");
+		return TRUE;
+	}
 
 	fu_device_set_status (device, FWUPD_STATUS_DEVICE_RESTART);
 	if (!fu_colorhug_device_msg (self, CH_CMD_BOOT_FLASH,
@@ -203,10 +219,11 @@ fu_colorhug_device_attach (FuDevice *device, GError **error)
 			     error_local->message);
 		return FALSE;
 	}
+	fu_device_add_flag (device, FWUPD_DEVICE_FLAG_WAIT_FOR_REPLUG);
 	return TRUE;
 }
 
-gboolean
+static gboolean
 fu_colorhug_device_set_flash_success (FuColorhugDevice *self,
 				      gboolean val,
 				      GError **error)
@@ -227,6 +244,14 @@ fu_colorhug_device_set_flash_success (FuColorhugDevice *self,
 		return FALSE;
 	}
 	return TRUE;
+}
+
+
+static gboolean
+fu_colorhug_device_reload (FuDevice *device, GError **error)
+{
+	FuColorhugDevice *self = FU_COLORHUG_DEVICE (device);
+	return fu_colorhug_device_set_flash_success (self, TRUE, error);
 }
 
 static gboolean
@@ -313,7 +338,7 @@ fu_colorhug_device_setup (FuDevice *device, GError **error)
 		version = fu_colorhug_device_get_version (self, &error_local);
 		if (version != NULL) {
 			g_debug ("obtained fwver using API '%s'", version);
-			fu_device_set_version (device, version, FWUPD_VERSION_FORMAT_TRIPLET);
+			fu_device_set_version (device, version);
 		} else {
 			g_warning ("failed to get firmware version: %s",
 				   error_local->message);
@@ -442,8 +467,11 @@ fu_colorhug_device_init (FuColorhugDevice *self)
 {
 	/* this is the application code */
 	self->start_addr = CH_EEPROM_ADDR_RUNCODE;
+	fu_device_set_protocol (FU_DEVICE (self), "com.hughski.colorhug");
+	fu_device_set_version_format (FU_DEVICE (self), FWUPD_VERSION_FORMAT_TRIPLET);
 	fu_device_set_remove_delay (FU_DEVICE (self),
 				    FU_DEVICE_REMOVE_DELAY_RE_ENUMERATE);
+	fu_device_add_flag (FU_DEVICE (self), FWUPD_DEVICE_FLAG_ADD_COUNTERPART_GUIDS);
 }
 
 static void
@@ -454,16 +482,8 @@ fu_colorhug_device_class_init (FuColorhugDeviceClass *klass)
 	klass_device->write_firmware = fu_colorhug_device_write_firmware;
 	klass_device->attach = fu_colorhug_device_attach;
 	klass_device->detach = fu_colorhug_device_detach;
+	klass_device->reload = fu_colorhug_device_reload;
 	klass_device->setup = fu_colorhug_device_setup;
 	klass_usb_device->open = fu_colorhug_device_open;
 	klass_usb_device->probe = fu_colorhug_device_probe;
-}
-
-FuColorhugDevice *
-fu_colorhug_device_new (FuUsbDevice *device)
-{
-	FuColorhugDevice *self = NULL;
-	self = g_object_new (FU_TYPE_COLORHUG_DEVICE, NULL);
-	fu_device_incorporate (FU_DEVICE (self), FU_DEVICE (device));
-	return self;
 }

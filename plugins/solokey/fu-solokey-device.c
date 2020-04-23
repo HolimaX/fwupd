@@ -63,14 +63,6 @@ fu_solokey_device_exchange (GByteArray *req, guint8 cmd, guint32 addr, GByteArra
 }
 
 static gboolean
-fu_solokey_device_probe (FuUsbDevice *device, GError **error)
-{
-	/* always disregard the bcdVersion */
-	fu_device_set_version (FU_DEVICE (device), NULL, FWUPD_VERSION_FORMAT_UNKNOWN);
-	return TRUE;
-}
-
-static gboolean
 fu_solokey_device_open (FuUsbDevice *device, GError **error)
 {
 	GUsbDevice *usb_device = fu_usb_device_get_dev (device);
@@ -120,8 +112,11 @@ fu_solokey_device_open (FuUsbDevice *device, GError **error)
 		fu_device_set_version_bootloader (FU_DEVICE (device), split[2]);
 		fu_device_add_flag (FU_DEVICE (device), FWUPD_DEVICE_FLAG_IS_BOOTLOADER);
 		fu_device_remove_flag (FU_DEVICE (device), FWUPD_DEVICE_FLAG_NEEDS_BOOTLOADER);
+	} else if (g_strcmp0 (split[1], "Keys") == 0 && g_strcmp0 (split[2], "Solo") == 0) {
+		fu_device_add_flag (FU_DEVICE (device), FWUPD_DEVICE_FLAG_IS_BOOTLOADER);
+		fu_device_remove_flag (FU_DEVICE (device), FWUPD_DEVICE_FLAG_NEEDS_BOOTLOADER);
 	} else {
-		fu_device_set_version (FU_DEVICE (device), split[1], FWUPD_VERSION_FORMAT_TRIPLET);
+		fu_device_set_version (FU_DEVICE (device), split[1]);
 		fu_device_remove_flag (FU_DEVICE (device), FWUPD_DEVICE_FLAG_IS_BOOTLOADER);
 		fu_device_add_flag (FU_DEVICE (device), FWUPD_DEVICE_FLAG_NEEDS_BOOTLOADER);
 	}
@@ -212,7 +207,7 @@ fu_solokey_device_packet_rx (FuSolokeyDevice *self, GError **error)
 					      NULL, /* cancellable */
 					      error)) {
 		g_prefix_error (error, "failed to get reply: ");
-		return FALSE;
+		return NULL;
 	}
 	if (g_getenv ("FWUPD_SOLOKEY_VERBOSE") != NULL)
 		fu_common_dump_raw (G_LOG_DOMAIN, "RES", buf, actual_length);
@@ -312,7 +307,7 @@ fu_solokey_device_packet (FuSolokeyDevice *self, guint8 cmd,
 		g_set_error (error,
 			     FWUPD_ERROR,
 			     FWUPD_ERROR_INTERNAL,
-			     "commmand ID invalid, got %x", res->data[4]);
+			     "command ID invalid, got %x", res->data[4]);
 		return NULL;
 	}
 	return g_steal_pointer (&res);
@@ -360,7 +355,7 @@ fu_solokey_device_get_version_bl (FuSolokeyDevice *self, GError **error)
 	g_autoptr(GByteArray) req = g_byte_array_new ();
 	g_autoptr(GByteArray) res = NULL;
 
-	/* pass thru data */
+	/* pass through data */
 	fu_solokey_device_exchange (req, SOLO_BOOTLOADER_VERSION, 0x00, NULL);
 	res = fu_solokey_device_packet (self, SOLO_BOOTLOADER_HID_CMD_BOOT, req, error);
 	if (res == NULL)
@@ -436,7 +431,7 @@ fu_solokey_device_write_firmware (FuDevice *device,
 		return FALSE;
 
 	/* build packets */
-	fw = fu_firmware_image_get_bytes (img, error);
+	fw = fu_firmware_image_write (img, error);
 	if (fw == NULL)
 		return FALSE;
 	chunks = fu_chunk_array_new_from_bytes (fw,
@@ -470,7 +465,9 @@ fu_solokey_device_write_firmware (FuDevice *device,
 	}
 
 	/* verify the signature and reboot back to runtime */
-	fw_sig = fu_firmware_get_image_by_id_bytes (firmware, "signature", error);
+	fw_sig = fu_firmware_get_image_by_id_bytes (firmware,
+						    FU_FIRMWARE_IMAGE_ID_SIGNATURE,
+						    error);
 	if (fw_sig == NULL)
 		return FALSE;
 	return fu_solokey_device_verify (self, fw_sig, error);
@@ -482,6 +479,8 @@ fu_solokey_device_init (FuSolokeyDevice *self)
 	self->cid = 0xffffffff;
 	fu_device_add_flag (FU_DEVICE (self), FWUPD_DEVICE_FLAG_UPDATABLE);
 	fu_device_set_remove_delay (FU_DEVICE (self), FU_DEVICE_REMOVE_DELAY_USER_REPLUG);
+	fu_device_set_version_format (FU_DEVICE (self), FWUPD_VERSION_FORMAT_TRIPLET);
+	fu_device_set_protocol (FU_DEVICE (self), "com.solokeys");
 	fu_device_set_name (FU_DEVICE (self), "Solo Secure");
 	fu_device_set_summary (FU_DEVICE (self), "An open source FIDO2 security key");
 	fu_device_add_icon (FU_DEVICE (self), "applications-internet");
@@ -497,14 +496,4 @@ fu_solokey_device_class_init (FuSolokeyDeviceClass *klass)
 	klass_device->setup = fu_solokey_device_setup;
 	klass_usb_device->open = fu_solokey_device_open;
 	klass_usb_device->close = fu_solokey_device_close;
-	klass_usb_device->probe = fu_solokey_device_probe;
-}
-
-FuSolokeyDevice *
-fu_solokey_device_new (FuUsbDevice *device)
-{
-	FuSolokeyDevice *self = NULL;
-	self = g_object_new (FU_TYPE_SOLOKEY_DEVICE, NULL);
-	fu_device_incorporate (FU_DEVICE (self), FU_DEVICE (device));
-	return self;
 }

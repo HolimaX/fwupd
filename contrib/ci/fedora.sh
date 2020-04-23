@@ -7,7 +7,6 @@ git config tar.tar.xz.command "xz -c"
 mkdir -p build && pushd build
 rm -rf *
 meson .. \
-    -Db_sanitize=address \
     -Dgtkdoc=true \
     -Dman=true \
     -Dtests=true \
@@ -21,11 +20,12 @@ meson .. \
 ninja-build dist
 popd
 VERSION=`meson introspect build --projectinfo | jq -r .version`
+RPMVERSION=${VERSION//-/.}
 mkdir -p $HOME/rpmbuild/SOURCES/
 mv build/meson-dist/fwupd-$VERSION.tar.xz $HOME/rpmbuild/SOURCES/
 
 #generate a spec file
-sed "s,#VERSION#,$VERSION,;
+sed "s,#VERSION#,$RPMVERSION,;
      s,#BUILD#,1,;
      s,#LONGDATE#,`date '+%a %b %d %Y'`,;
      s,#ALPHATAG#,alpha,;
@@ -53,7 +53,7 @@ mkdir -p dist
 cp $HOME/rpmbuild/RPMS/*/*.rpm dist
 
 if [ "$CI" = "true" ]; then
-	sed "s,^BlacklistPlugins=test,BlacklistPlugins=," -i /etc/fwupd/daemon.conf
+	sed "s,^BlacklistPlugins=test;invalid,BlacklistPlugins=," -i /etc/fwupd/daemon.conf
 
 	# set up enough PolicyKit and D-Bus to run the daemon
 	mkdir -p /run/dbus

@@ -88,7 +88,23 @@ typedef enum {
  * @FWUPD_DEVICE_FLAG_ANOTHER_WRITE_REQUIRED:	Requires the update to be retried with a new plugin
  * @FWUPD_DEVICE_FLAG_NO_AUTO_INSTANCE_IDS:	Do not add instance IDs from the device baseclass
  * @FWUPD_DEVICE_FLAG_NEEDS_ACTIVATION:		Device update needs to be separately activated
+ * @FWUPD_DEVICE_FLAG_HISTORICAL		Device is for historical data only
  * @FWUPD_DEVICE_FLAG_ENSURE_SEMVER:		Ensure the version is a valid semantic version, e.g. numbers separated with dots
+ * @FWUPD_DEVICE_FLAG_ONLY_SUPPORTED:		Only devices supported in the metadata will be opened
+ * @FWUPD_DEVICE_FLAG_WILL_DISAPPEAR:		Device will disappear after update and can't be verified
+ * @FWUPD_DEVICE_FLAG_CAN_VERIFY:		Device checksums can be compared against metadata
+ * @FWUPD_DEVICE_FLAG_CAN_VERIFY_IMAGE:		Image can be dumped from device for verification
+ * @FWUPD_DEVICE_FLAG_DUAL_IMAGE:		Device update architecture uses A/B partitions for updates
+ * @FWUPD_DEVICE_FLAG_SELF_RECOVERY:		In flashing mode device will only accept intended payloads
+ * @FWUPD_DEVICE_FLAG_USABLE_DURING_UPDATE:	Device remains usable while fwupd flashes or schedules the update
+ * @FWUPD_DEVICE_FLAG_VERSION_CHECK_REQUIRED:	All firmware updates for this device require a firmware version check
+ * @FWUPD_DEVICE_FLAG_INSTALL_ALL_RELEASES:	Install each intermediate release rather than jumping direct to newest
+ * @FWUPD_DEVICE_FLAG_MD_SET_NAME:		Set the device name from the metadata <name> if available
+ * @FWUPD_DEVICE_FLAG_MD_SET_NAME_CATEGORY:	Set the device name from the metadata <category> if available
+ * @FWUPD_DEVICE_FLAG_MD_SET_VERFMT:		Set the device version format from the metadata if available
+ * @FWUPD_DEVICE_FLAG_ADD_COUNTERPART_GUIDS:	Add counterpart GUIDs from an alternate mode like bootloader
+ * @FWUPD_DEVICE_FLAG_NO_GUID_MATCHING:		Force an explicit ID match when adding devices to the device list
+ * @FWUPD_DEVICE_FLAG_UPDATABLE_HIDDEN:		Device is updatable but should not be called by the client
  *
  * The device flags.
  **/
@@ -115,6 +131,22 @@ typedef enum {
 #define FWUPD_DEVICE_FLAG_NO_AUTO_INSTANCE_IDS	(1u << 19)	/* Since: 1.2.5 */
 #define FWUPD_DEVICE_FLAG_NEEDS_ACTIVATION	(1u << 20)	/* Since: 1.2.6 */
 #define FWUPD_DEVICE_FLAG_ENSURE_SEMVER		(1u << 21)	/* Since: 1.2.9 */
+#define FWUPD_DEVICE_FLAG_HISTORICAL		(1u << 22)	/* Since: 1.3.2 */
+#define FWUPD_DEVICE_FLAG_ONLY_SUPPORTED	(1u << 23)	/* Since: 1.3.3 */
+#define FWUPD_DEVICE_FLAG_WILL_DISAPPEAR	(1u << 24)	/* Since: 1.3.3 */
+#define FWUPD_DEVICE_FLAG_CAN_VERIFY		(1u << 25)	/* Since: 1.3.3 */
+#define FWUPD_DEVICE_FLAG_CAN_VERIFY_IMAGE	(1u << 26)	/* Since: 1.3.3 */
+#define FWUPD_DEVICE_FLAG_DUAL_IMAGE		(1u << 27)	/* Since: 1.3.3 */
+#define FWUPD_DEVICE_FLAG_SELF_RECOVERY		(1u << 28)	/* Since: 1.3.3 */
+#define FWUPD_DEVICE_FLAG_USABLE_DURING_UPDATE	(1u << 29)	/* Since: 1.3.3 */
+#define FWUPD_DEVICE_FLAG_VERSION_CHECK_REQUIRED (1u << 30)	/* Since: 1.3.7 */
+#define FWUPD_DEVICE_FLAG_INSTALL_ALL_RELEASES	(1u << 31)	/* Since: 1.3.7 */
+#define FWUPD_DEVICE_FLAG_MD_SET_NAME		(1llu << 32)	/* Since: 1.4.0 */
+#define FWUPD_DEVICE_FLAG_MD_SET_NAME_CATEGORY	(1llu << 33)	/* Since: 1.4.0 */
+#define FWUPD_DEVICE_FLAG_MD_SET_VERFMT		(1llu << 34)	/* Since: 1.4.0 */
+#define FWUPD_DEVICE_FLAG_ADD_COUNTERPART_GUIDS	(1llu << 35)	/* Since: 1.4.0 */
+#define FWUPD_DEVICE_FLAG_NO_GUID_MATCHING	(1llu << 36)	/* Since: 1.4.1 */
+#define FWUPD_DEVICE_FLAG_UPDATABLE_HIDDEN	(1llu << 37)	/* Since: 1.4.1 */
 #define FWUPD_DEVICE_FLAG_UNKNOWN		G_MAXUINT64	/* Since: 0.7.3 */
 typedef guint64 FwupdDeviceFlags;
 
@@ -139,6 +171,26 @@ typedef guint64 FwupdDeviceFlags;
 #define FWUPD_RELEASE_FLAG_BLOCKED_APPROVAL	(1u << 5)	/* Since: 1.2.6 */
 #define FWUPD_RELEASE_FLAG_UNKNOWN		G_MAXUINT64	/* Since: 1.2.6 */
 typedef guint64 FwupdReleaseFlags;
+
+/**
+ * FwupdReleaseUrgency:
+ * @FWUPD_RELEASE_URGENCY_UNKNOWN:		Unknown
+ * @FWUPD_RELEASE_URGENCY_LOW:			Low
+ * @FWUPD_RELEASE_URGENCY_MEDIUM:		Medium
+ * @FWUPD_RELEASE_URGENCY_HIGH:			High
+ * @FWUPD_RELEASE_URGENCY_CRITICAL:		Critical, e.g. a security fix
+ *
+ * The release urgency.
+ **/
+typedef enum {
+	FWUPD_RELEASE_URGENCY_UNKNOWN,				/* Since: 1.4.0 */
+	FWUPD_RELEASE_URGENCY_LOW,				/* Since: 1.4.0 */
+	FWUPD_RELEASE_URGENCY_MEDIUM,				/* Since: 1.4.0 */
+	FWUPD_RELEASE_URGENCY_HIGH,				/* Since: 1.4.0 */
+	FWUPD_RELEASE_URGENCY_CRITICAL,				/* Since: 1.4.0 */
+	/*< private >*/
+	FWUPD_RELEASE_URGENCY_LAST
+} FwupdReleaseUrgency;
 
 /**
  * FwupdInstallFlags:
@@ -206,6 +258,7 @@ typedef enum {
  * @FWUPD_KEYRING_KIND_NONE:			No verification
  * @FWUPD_KEYRING_KIND_GPG:			Verification using GPG
  * @FWUPD_KEYRING_KIND_PKCS7:			Verification using PKCS7
+ * @FWUPD_KEYRING_KIND_JCAT:			Verification using Jcat
  *
  * The update state.
  **/
@@ -214,6 +267,7 @@ typedef enum {
 	FWUPD_KEYRING_KIND_NONE,			/* Since: 0.9.7 */
 	FWUPD_KEYRING_KIND_GPG,				/* Since: 0.9.7 */
 	FWUPD_KEYRING_KIND_PKCS7,			/* Since: 0.9.7 */
+	FWUPD_KEYRING_KIND_JCAT,			/* Since: 1.4.0 */
 	/*< private >*/
 	FWUPD_KEYRING_KIND_LAST
 } FwupdKeyringKind;
@@ -225,10 +279,14 @@ typedef enum {
  * @FWUPD_VERSION_FORMAT_NUMBER:		A single integer version number
  * @FWUPD_VERSION_FORMAT_PAIR:			Two AABB.CCDD version numbers
  * @FWUPD_VERSION_FORMAT_TRIPLET:		Microsoft-style AA.BB.CCDD version numbers
- * @FWUPD_VERSION_FORMAT_QUAD:			Dell-style AA.BB.CC.DD version numbers
+ * @FWUPD_VERSION_FORMAT_QUAD:			UEFI-style AA.BB.CC.DD version numbers
  * @FWUPD_VERSION_FORMAT_BCD:			Binary coded decimal notation
  * @FWUPD_VERSION_FORMAT_INTEL_ME:		Intel ME-style bitshifted notation
  * @FWUPD_VERSION_FORMAT_INTEL_ME2:		Intel ME-style A.B.CC.DDDD notation notation
+ * @FWUPD_VERSION_FORMAT_SURFACE_LEGACY:	Legacy Microsoft Surface 10b.12b.10b
+ * @FWUPD_VERSION_FORMAT_SURFACE:		Microsoft Surface 8b.16b.8b
+ * @FWUPD_VERSION_FORMAT_DELL_BIOS:		Dell BIOS BB.CC.DD style
+ * @FWUPD_VERSION_FORMAT_HEX:			Hexadecimal 0xAABCCDD style
  *
  * The flags used when parsing version numbers.
  *
@@ -245,6 +303,10 @@ typedef enum {
 	FWUPD_VERSION_FORMAT_BCD,			/* Since: 1.2.9 */
 	FWUPD_VERSION_FORMAT_INTEL_ME,			/* Since: 1.2.9 */
 	FWUPD_VERSION_FORMAT_INTEL_ME2,			/* Since: 1.2.9 */
+	FWUPD_VERSION_FORMAT_SURFACE_LEGACY,		/* Since: 1.3.4 */
+	FWUPD_VERSION_FORMAT_SURFACE,			/* Since: 1.3.4 */
+	FWUPD_VERSION_FORMAT_DELL_BIOS,			/* Since: 1.3.6 */
+	FWUPD_VERSION_FORMAT_HEX,		/* Since: 1.4.0 */
 	/*< private >*/
 	FWUPD_VERSION_FORMAT_LAST
 } FwupdVersionFormat;
@@ -255,6 +317,8 @@ const gchar	*fwupd_device_flag_to_string		(FwupdDeviceFlags device_flag);
 FwupdDeviceFlags fwupd_device_flag_from_string		(const gchar	*device_flag);
 const gchar	*fwupd_release_flag_to_string		(FwupdReleaseFlags release_flag);
 FwupdReleaseFlags fwupd_release_flag_from_string	(const gchar	*release_flag);
+const gchar	*fwupd_release_urgency_to_string	(FwupdReleaseUrgency release_urgency);
+FwupdReleaseUrgency fwupd_release_urgency_from_string	(const gchar	*release_urgency);
 const gchar	*fwupd_update_state_to_string		(FwupdUpdateState update_state);
 FwupdUpdateState fwupd_update_state_from_string		(const gchar	*update_state);
 const gchar	*fwupd_trust_flag_to_string		(FwupdTrustFlags trust_flag);

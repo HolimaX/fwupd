@@ -16,6 +16,7 @@
 #include "fu-ucs2.h"
 #include "fu-uefi-bootmgr.h"
 #include "fu-uefi-common.h"
+#include "fu-efivar.h"
 
 /* XXX PJFIX: this should be in efiboot-loadopt.h in efivar */
 #define LOAD_OPTION_ACTIVE      0x00000001
@@ -95,16 +96,14 @@ fu_uefi_setup_bootnext_with_dp (const guint8 *dp_buf, guint8 *opt, gssize opt_si
 	efi_load_option *loadopt = NULL;
 	gchar *name = NULL;
 	gint rc;
-	gint set_entries[0x10000 / sizeof(gint)] = {0,};
 	gsize var_data_size = 0;
-	guint16 real_boot16;
 	guint32 attr;
-	guint32 boot_next = 0x10000;
+	guint16 boot_next = G_MAXUINT16;
 	g_autofree guint8 *var_data = NULL;
+	g_autofree guint8 *set_entries = g_malloc0 (G_MAXUINT16);
 
 	while ((rc = efi_get_next_variable_name (&guid, &name)) > 0) {
 		const gchar *desc;
-		gint div, mod;
 		gint scanned = 0;
 		guint16 entry = 0;
 		g_autofree guint8 *var_data_tmp = NULL;
@@ -124,10 +123,8 @@ fu_uefi_setup_bootnext_with_dp (const guint8 *dp_buf, guint8 *opt, gssize opt_si
 		if (scanned != 8)
 			continue;
 
-		div = entry / (sizeof(set_entries[0]) * 8);
-		mod = entry % (sizeof(set_entries[0]) * 8);
-
-		set_entries[div] |= 1 << mod;
+		/* mark this as used */
+		set_entries[entry] = 1;
 
 		rc = efi_get_variable (*guid, name, &var_data_tmp, &var_data_size, &attr);
 		if (rc < 0) {
@@ -180,15 +177,13 @@ fu_uefi_setup_bootnext_with_dp (const guint8 *dp_buf, guint8 *opt, gssize opt_si
 	/* create a new one */
 	} else {
 		g_autofree gchar *boot_next_name = NULL;
-		for (guint32 value = 0; value < 0x10000; value++) {
-			gint div = value / (sizeof(set_entries[0]) * 8);
-			gint mod = value % (sizeof(set_entries[0]) * 8);
-			if (set_entries[div] & (1 << mod))
+		for (guint16 value = 0; value < G_MAXUINT16; value++) {
+			if (set_entries[value])
 				continue;
 			boot_next = value;
 			break;
 		}
-		if (boot_next >= 0x10000) {
+		if (boot_next == G_MAXUINT16) {
 			g_set_error (error,
 				     G_IO_ERROR,
 				     G_IO_ERROR_FAILED,
@@ -196,8 +191,7 @@ fu_uefi_setup_bootnext_with_dp (const guint8 *dp_buf, guint8 *opt, gssize opt_si
 				     boot_next);
 			return FALSE;
 		}
-		boot_next_name = g_strdup_printf ("Boot%04X",
-						  (guint) (boot_next & 0xffff));
+		boot_next_name = g_strdup_printf ("Boot%04X", (guint) boot_next);
 		rc = efi_set_variable (efi_guid_global, boot_next_name, opt, opt_size,
 				       EFI_VARIABLE_NON_VOLATILE |
 				       EFI_VARIABLE_BOOTSERVICE_ACCESS |
@@ -218,8 +212,7 @@ fu_uefi_setup_bootnext_with_dp (const guint8 *dp_buf, guint8 *opt, gssize opt_si
 		return FALSE;
 
 	/* set the boot next */
-	real_boot16 = boot_next;
-	rc = efi_set_variable (efi_guid_global, "BootNext", (guint8 *)&real_boot16, 2,
+	rc = efi_set_variable (efi_guid_global, "BootNext", (guint8 *)&boot_next, 2,
 			       EFI_VARIABLE_NON_VOLATILE |
 			       EFI_VARIABLE_BOOTSERVICE_ACCESS |
 			       EFI_VARIABLE_RUNTIME_ACCESS,
@@ -229,7 +222,7 @@ fu_uefi_setup_bootnext_with_dp (const guint8 *dp_buf, guint8 *opt, gssize opt_si
 			     G_IO_ERROR,
 			     G_IO_ERROR_FAILED,
 			     "could not set BootNext(%" G_GUINT16_FORMAT ")",
-			     real_boot16);
+			     boot_next);
 		return FALSE;
 	}
 	return TRUE;
@@ -288,7 +281,8 @@ fu_uefi_bootmgr_bootnext (const gchar *esp_path,
 			  GError **error)
 {
 	const gchar *filepath;
-	gboolean use_fwup_path = FALSE;
+	gboolean use_fwup_path = TRUE;
+	gboolean secure_boot = FALSE;
 	gsize loader_sz = 0;
 	gssize opt_size = 0;
 	gssize sz, dp_size = 0;
@@ -303,7 +297,7 @@ fu_uefi_bootmgr_bootnext (const gchar *esp_path,
 	g_autofree gchar *target_app = NULL;
 
 	/* skip for self tests */
-	if (g_getenv ("FWUPD_UEFI_ESP_PATH") != NULL)
+	if (g_getenv ("FWUPD_UEFI_TEST") != NULL)
 		return TRUE;
 
 	/* if secure boot was turned on this might need to be installed separately */
@@ -311,34 +305,36 @@ fu_uefi_bootmgr_bootnext (const gchar *esp_path,
 	if (source_app == NULL)
 		return FALSE;
 
-	/* test to make sure shim is there if we need it */
-	shim_app = fu_uefi_get_esp_app_path (esp_path, "shim", error);
-	if (shim_app == NULL)
-		return FALSE;
-	if (g_file_test (shim_app, G_FILE_TEST_EXISTS)) {
-		/* use a custom copy of shim for firmware updates */
-		if (flags & FU_UEFI_BOOTMGR_FLAG_USE_SHIM_UNIQUE) {
-			shim_cpy = fu_uefi_get_esp_app_path (esp_path, "shimfwupd", error);
-			if (shim_cpy == NULL)
-				return FALSE;
-			if (!fu_uefi_cmp_asset (shim_app, shim_cpy)) {
-				if (!fu_uefi_copy_asset (shim_app, shim_cpy, error))
+	/* test if we should use shim */
+	secure_boot = fu_efivar_secure_boot_enabled ();
+	if (secure_boot) {
+		/* test to make sure shim is there if we need it */
+		shim_app = fu_uefi_get_esp_app_path (esp_path, "shim", error);
+		if (shim_app == NULL)
+			return FALSE;
+
+		if (g_file_test (shim_app, G_FILE_TEST_EXISTS)) {
+			/* use a custom copy of shim for firmware updates */
+			if (flags & FU_UEFI_BOOTMGR_FLAG_USE_SHIM_UNIQUE) {
+				shim_cpy = fu_uefi_get_esp_app_path (esp_path, "shimfwupd", error);
+				if (shim_cpy == NULL)
 					return FALSE;
+				if (!fu_uefi_cmp_asset (shim_app, shim_cpy)) {
+					if (!fu_uefi_copy_asset (shim_app, shim_cpy, error))
+						return FALSE;
+				}
+				filepath = shim_cpy;
+			} else {
+				filepath = shim_app;
 			}
-			filepath = shim_cpy;
-		} else {
-			filepath = shim_app;
-		}
-	} else {
-		if (fu_uefi_secure_boot_enabled () &&
-		    (flags & FU_UEFI_BOOTMGR_FLAG_USE_SHIM_FOR_SB) > 0) {
+			use_fwup_path = FALSE;
+		} else if ((flags & FU_UEFI_BOOTMGR_FLAG_USE_SHIM_FOR_SB) > 0) {
 			g_set_error_literal (error,
 					     FWUPD_ERROR,
 					     FWUPD_ERROR_BROKEN_SYSTEM,
 					     "Secure boot is enabled, but shim isn't installed to the EFI system partition");
 			return FALSE;
 		}
-		use_fwup_path = TRUE;
 	}
 
 	/* test if correct asset in place */

@@ -318,8 +318,10 @@ fu_fastboot_device_setup (FuDevice *device, GError **error)
 	/* bootloader version */
 	if (!fu_fastboot_device_getvar (device, "version-bootloader", &version_bootloader, error))
 		return FALSE;
-	if (version_bootloader != NULL && version_bootloader[0] != '\0')
+	if (version_bootloader != NULL && version_bootloader[0] != '\0') {
+		fu_device_set_version_format (device, FWUPD_VERSION_FORMAT_PAIR);
 		fu_device_set_version_bootloader (device, version_bootloader);
+	}
 
 	/* serialno */
 	if (!fu_fastboot_device_getvar (device, "serialno", &serialno, error))
@@ -681,9 +683,12 @@ static gboolean
 fu_fastboot_device_attach (FuDevice *device, GError **error)
 {
 	fu_device_set_status (device, FWUPD_STATUS_DEVICE_RESTART);
-	return fu_fastboot_device_cmd (device, "reboot",
-				       FU_FASTBOOT_DEVICE_READ_FLAG_NONE,
-				       error);
+	if (!fu_fastboot_device_cmd (device, "reboot",
+				     FU_FASTBOOT_DEVICE_READ_FLAG_NONE,
+				     error))
+		return FALSE;
+	fu_device_add_flag (device, FWUPD_DEVICE_FLAG_WAIT_FOR_REPLUG);
+	return TRUE;
 }
 
 static void
@@ -691,7 +696,10 @@ fu_fastboot_device_init (FuFastbootDevice *self)
 {
 	/* this is a safe default, even using USBv1 */
 	self->blocksz = 512;
+	fu_device_set_protocol (FU_DEVICE (self), "com.google.fastboot");
 	fu_device_add_flag (FU_DEVICE (self), FWUPD_DEVICE_FLAG_UPDATABLE);
+	fu_device_add_flag (FU_DEVICE (self), FWUPD_DEVICE_FLAG_IS_BOOTLOADER);
+	fu_device_add_flag (FU_DEVICE (self), FWUPD_DEVICE_FLAG_ADD_COUNTERPART_GUIDS);
 	fu_device_set_remove_delay (FU_DEVICE (self), FASTBOOT_REMOVE_DELAY_RE_ENUMERATE);
 }
 
@@ -708,12 +716,4 @@ fu_fastboot_device_class_init (FuFastbootDeviceClass *klass)
 	klass_device->set_quirk_kv = fu_fastboot_device_set_quirk_kv;
 	klass_usb_device->open = fu_fastboot_device_open;
 	klass_usb_device->close = fu_fastboot_device_close;
-}
-
-FuFastbootDevice *
-fu_fastboot_device_new (FuUsbDevice *device)
-{
-	FuFastbootDevice *self = g_object_new (FU_TYPE_FASTBOOT_DEVICE, NULL);
-	fu_device_incorporate (FU_DEVICE (self), FU_DEVICE (device));
-	return self;
 }

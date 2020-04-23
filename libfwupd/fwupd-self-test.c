@@ -7,7 +7,9 @@
 #include "config.h"
 
 #include <glib-object.h>
+#ifdef HAVE_FNMATCH_H
 #include <fnmatch.h>
+#endif
 
 #include "fwupd-client.h"
 #include "fwupd-common.h"
@@ -27,8 +29,13 @@ fu_test_compare_lines (const gchar *txt1, const gchar *txt2, GError **error)
 		return TRUE;
 
 	/* matches a pattern */
+#ifdef HAVE_FNMATCH_H
 	if (fnmatch (txt2, txt1, FNM_NOESCAPE) == 0)
 		return TRUE;
+#else
+	if (g_strcmp0 (txt1, txt2) == 0)
+		return TRUE;
+#endif
 
 	/* save temp files and diff them */
 	if (!g_file_set_contents ("/tmp/a", txt1, -1, error))
@@ -122,6 +129,11 @@ fwupd_enums_func (void)
 		g_assert_cmpstr (tmp, !=, NULL);
 		g_assert_cmpint (fwupd_trust_flag_from_string (tmp), ==, i);
 	}
+	for (guint i = FWUPD_RELEASE_URGENCY_UNKNOWN + 1; i < FWUPD_RELEASE_URGENCY_LAST; i++) {
+		const gchar *tmp = fwupd_release_urgency_to_string (i);
+		g_assert_cmpstr (tmp, !=, NULL);
+		g_assert_cmpint (fwupd_release_urgency_from_string (tmp), ==, i);
+	}
 	for (guint i = 1; i < FWUPD_VERSION_FORMAT_LAST; i++) {
 		const gchar *tmp = fwupd_version_format_to_string (i);
 		g_assert_cmpstr (tmp, !=, NULL);
@@ -143,32 +155,40 @@ fwupd_remote_download_func (void)
 	gboolean ret;
 	g_autofree gchar *fn = NULL;
 	g_autofree gchar *directory = NULL;
+	g_autofree gchar *expected_metadata = NULL;
+	g_autofree gchar *expected_signature = NULL;
 	g_autoptr(FwupdRemote) remote = NULL;
 	g_autoptr(GError) error = NULL;
 
 	remote = fwupd_remote_new ();
-	directory = g_build_filename (LOCALSTATEDIR,
+	directory = g_build_filename (FWUPD_LOCALSTATEDIR,
 				      "lib",
 				      "fwupd",
 				      "remotes.d",
 				      NULL);
+	expected_metadata = g_build_filename (FWUPD_LOCALSTATEDIR,
+					      "lib",
+					      "fwupd",
+					      "remotes.d",
+					      "lvfs",
+					      "metadata.xml.gz",
+					      NULL);
+	expected_signature = g_strdup_printf ("%s.jcat", expected_metadata);
 	fwupd_remote_set_remotes_dir (remote, directory);
 	fn = g_build_filename (FU_SELF_TEST_REMOTES_DIR, "remotes.d", "lvfs.conf", NULL);
 	ret = fwupd_remote_load_from_filename (remote, fn, NULL, &error);
 	g_assert_no_error (error);
 	g_assert (ret);
 	g_assert_cmpint (fwupd_remote_get_kind (remote), ==, FWUPD_REMOTE_KIND_DOWNLOAD);
-	g_assert_cmpint (fwupd_remote_get_keyring_kind (remote), ==, FWUPD_KEYRING_KIND_GPG);
+	g_assert_cmpint (fwupd_remote_get_keyring_kind (remote), ==, FWUPD_KEYRING_KIND_JCAT);
 	g_assert_cmpint (fwupd_remote_get_priority (remote), ==, 0);
 	g_assert (fwupd_remote_get_enabled (remote));
 	g_assert (fwupd_remote_get_metadata_uri (remote) != NULL);
 	g_assert (fwupd_remote_get_metadata_uri_sig (remote) != NULL);
 	g_assert_cmpstr (fwupd_remote_get_title (remote), ==, "Linux Vendor Firmware Service");
 	g_assert_cmpstr (fwupd_remote_get_report_uri (remote), ==, "https://fwupd.org/lvfs/firmware/report");
-	g_assert_cmpstr (fwupd_remote_get_filename_cache (remote), ==,
-			 LOCALSTATEDIR "/lib/fwupd/remotes.d/lvfs/metadata.xml.gz");
-	g_assert_cmpstr (fwupd_remote_get_filename_cache_sig (remote), ==,
-			 LOCALSTATEDIR "/lib/fwupd/remotes.d/lvfs/metadata.xml.gz.asc");
+	g_assert_cmpstr (fwupd_remote_get_filename_cache (remote), ==, expected_metadata);
+	g_assert_cmpstr (fwupd_remote_get_filename_cache_sig (remote), ==, expected_signature);
 }
 
 /* verify we used the FirmwareBaseURI just for firmware */
@@ -183,7 +203,7 @@ fwupd_remote_baseuri_func (void)
 	g_autoptr(GError) error = NULL;
 
 	remote = fwupd_remote_new ();
-	directory = g_build_filename (LOCALSTATEDIR,
+	directory = g_build_filename (FWUPD_LOCALSTATEDIR,
 				      "lib",
 				      "fwupd",
 				      "remotes.d",
@@ -194,14 +214,14 @@ fwupd_remote_baseuri_func (void)
 	g_assert_no_error (error);
 	g_assert (ret);
 	g_assert_cmpint (fwupd_remote_get_kind (remote), ==, FWUPD_REMOTE_KIND_DOWNLOAD);
-	g_assert_cmpint (fwupd_remote_get_keyring_kind (remote), ==, FWUPD_KEYRING_KIND_GPG);
+	g_assert_cmpint (fwupd_remote_get_keyring_kind (remote), ==, FWUPD_KEYRING_KIND_JCAT);
 	g_assert_cmpint (fwupd_remote_get_priority (remote), ==, 0);
 	g_assert (fwupd_remote_get_enabled (remote));
 	g_assert_cmpstr (fwupd_remote_get_checksum (remote), ==, NULL);
 	g_assert_cmpstr (fwupd_remote_get_metadata_uri (remote), ==,
 			 "https://s3.amazonaws.com/lvfsbucket/downloads/firmware.xml.gz");
 	g_assert_cmpstr (fwupd_remote_get_metadata_uri_sig (remote), ==,
-			 "https://s3.amazonaws.com/lvfsbucket/downloads/firmware.xml.gz.asc");
+			 "https://s3.amazonaws.com/lvfsbucket/downloads/firmware.xml.gz.jcat");
 	firmware_uri = fwupd_remote_build_firmware_uri (remote, "http://bbc.co.uk/firmware.cab", &error);
 	g_assert_no_error (error);
 	g_assert_cmpstr (firmware_uri, ==, "https://my.fancy.cdn/firmware.cab");
@@ -219,7 +239,7 @@ fwupd_remote_nopath_func (void)
 	g_autofree gchar *directory = NULL;
 
 	remote = fwupd_remote_new ();
-	directory = g_build_filename (LOCALSTATEDIR,
+	directory = g_build_filename (FWUPD_LOCALSTATEDIR,
 				      "lib",
 				      "fwupd",
 				      "remotes.d",
@@ -230,14 +250,14 @@ fwupd_remote_nopath_func (void)
 	g_assert_no_error (error);
 	g_assert (ret);
 	g_assert_cmpint (fwupd_remote_get_kind (remote), ==, FWUPD_REMOTE_KIND_DOWNLOAD);
-	g_assert_cmpint (fwupd_remote_get_keyring_kind (remote), ==, FWUPD_KEYRING_KIND_GPG);
+	g_assert_cmpint (fwupd_remote_get_keyring_kind (remote), ==, FWUPD_KEYRING_KIND_JCAT);
 	g_assert_cmpint (fwupd_remote_get_priority (remote), ==, 0);
 	g_assert (fwupd_remote_get_enabled (remote));
 	g_assert_cmpstr (fwupd_remote_get_checksum (remote), ==, NULL);
 	g_assert_cmpstr (fwupd_remote_get_metadata_uri (remote), ==,
 			 "https://s3.amazonaws.com/lvfsbucket/downloads/firmware.xml.gz");
 	g_assert_cmpstr (fwupd_remote_get_metadata_uri_sig (remote), ==,
-			 "https://s3.amazonaws.com/lvfsbucket/downloads/firmware.xml.gz.asc");
+			 "https://s3.amazonaws.com/lvfsbucket/downloads/firmware.xml.gz.jcat");
 	firmware_uri = fwupd_remote_build_firmware_uri (remote, "firmware.cab", &error);
 	g_assert_no_error (error);
 	g_assert_cmpstr (firmware_uri, ==, "https://s3.amazonaws.com/lvfsbucket/downloads/firmware.cab");
@@ -422,6 +442,11 @@ fwupd_client_devices_func (void)
 
 	/* only run if running fwupd is new enough */
 	ret = fwupd_client_connect (client, NULL, &error);
+	if (ret == FALSE && g_error_matches (error, G_DBUS_ERROR, G_DBUS_ERROR_TIMED_OUT)) {
+		g_debug ("%s", error->message);
+		g_test_skip ("timeout connecting to daemon");
+		return;
+	}
 	g_assert_no_error (error);
 	g_assert_true (ret);
 	if (fwupd_client_get_daemon_version (client) == NULL) {
@@ -471,6 +496,11 @@ fwupd_client_remotes_func (void)
 
 	/* only run if running fwupd is new enough */
 	ret = fwupd_client_connect (client, NULL, &error);
+	if (ret == FALSE && g_error_matches (error, G_DBUS_ERROR, G_DBUS_ERROR_TIMED_OUT)) {
+		g_debug ("%s", error->message);
+		g_test_skip ("timeout connecting to daemon");
+		return;
+	}
 	g_assert_no_error (error);
 	g_assert_true (ret);
 	if (fwupd_client_get_daemon_version (client) == NULL) {
@@ -525,12 +555,23 @@ fwupd_has_system_bus (void)
 static void
 fwupd_common_machine_hash_func (void)
 {
+	gsize sz = 0;
+	g_autofree gchar *buf = NULL;
 	g_autofree gchar *mhash1 = NULL;
 	g_autofree gchar *mhash2 = NULL;
 	g_autoptr(GError) error = NULL;
 
 	if (!g_file_test ("/etc/machine-id", G_FILE_TEST_EXISTS)) {
 		g_test_skip ("Missing /etc/machine-id");
+		return;
+	}
+	if (!g_file_get_contents ("/etc/machine-id", &buf, &sz, &error)) {
+		g_test_skip ("/etc/machine-id is unreadable");
+		return;
+	}
+
+	if (sz == 0) {
+		g_test_skip ("Empty /etc/machine-id");
 		return;
 	}
 
@@ -541,6 +582,19 @@ fwupd_common_machine_hash_func (void)
 	g_assert_no_error (error);
 	g_assert_cmpstr (mhash2, !=, NULL);
 	g_assert_cmpstr (mhash2, !=, mhash1);
+}
+
+static void
+fwupd_common_device_id_func (void)
+{
+	g_assert_false (fwupd_device_id_is_valid (NULL));
+	g_assert_false (fwupd_device_id_is_valid (""));
+	g_assert_false (fwupd_device_id_is_valid ("1ff60ab2-3905-06a1-b476-0371f00c9e9b"));
+	g_assert_false (fwupd_device_id_is_valid ("aaaaaad3fae86d95e5d56626129d00e332c4b8dac95442"));
+	g_assert_false (fwupd_device_id_is_valid ("x3fae86d95e5d56626129d00e332c4b8dac95442"));
+	g_assert_false (fwupd_device_id_is_valid ("D3FAE86D95E5D56626129D00E332C4B8DAC95442"));
+	g_assert_false (fwupd_device_id_is_valid (FWUPD_DEVICE_ID_ANY));
+	g_assert_true (fwupd_device_id_is_valid ("d3fae86d95e5d56626129d00e332c4b8dac95442"));
 }
 
 static void
@@ -607,6 +661,7 @@ main (int argc, char **argv)
 	/* tests go here */
 	g_test_add_func ("/fwupd/enums", fwupd_enums_func);
 	g_test_add_func ("/fwupd/common{machine-hash}", fwupd_common_machine_hash_func);
+	g_test_add_func ("/fwupd/common{device-id}", fwupd_common_device_id_func);
 	g_test_add_func ("/fwupd/common{guid}", fwupd_common_guid_func);
 	g_test_add_func ("/fwupd/release", fwupd_release_func);
 	g_test_add_func ("/fwupd/device", fwupd_device_func);

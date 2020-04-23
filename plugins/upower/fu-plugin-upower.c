@@ -7,12 +7,14 @@
 #include "config.h"
 
 #include "fu-plugin-vfuncs.h"
+#include "fu-hash.h"
 
-#define MINIMUM_BATTERY_PERCENTAGE	30
+#define MINIMUM_BATTERY_PERCENTAGE_FALLBACK	10
 
 struct FuPluginData {
 	GDBusProxy		*upower_proxy;
 	GDBusProxy		*display_proxy;
+	guint64			 minimum_battery;
 };
 
 void
@@ -36,6 +38,8 @@ gboolean
 fu_plugin_startup (FuPlugin *plugin, GError **error)
 {
 	FuPluginData *data = fu_plugin_get_data (plugin);
+	g_autofree gchar *name_owner = NULL;
+	g_autofree gchar *battery_str = NULL;
 	data->upower_proxy =
 		g_dbus_proxy_new_for_bus_sync (G_BUS_TYPE_SYSTEM,
 					       G_DBUS_PROXY_FLAGS_DO_NOT_CONNECT_SIGNALS,
@@ -47,6 +51,15 @@ fu_plugin_startup (FuPlugin *plugin, GError **error)
 					       error);
 	if (data->upower_proxy == NULL) {
 		g_prefix_error (error, "failed to connect to upower: ");
+		return FALSE;
+	}
+	name_owner = g_dbus_proxy_get_name_owner (data->upower_proxy);
+	if (name_owner == NULL) {
+		g_set_error (error,
+			     FWUPD_ERROR,
+			     FWUPD_ERROR_NOT_SUPPORTED,
+			     "no owner for %s",
+			     g_dbus_proxy_get_name (data->upower_proxy));
 		return FALSE;
 	}
 	data->display_proxy =
@@ -61,6 +74,17 @@ fu_plugin_startup (FuPlugin *plugin, GError **error)
 	if (data->display_proxy == NULL) {
 		g_prefix_error (error, "failed to connect to upower: ");
 		return FALSE;
+	}
+
+	battery_str = fu_plugin_get_config_value (plugin, "BatteryThreshold");
+	if (battery_str == NULL)
+		data->minimum_battery = MINIMUM_BATTERY_PERCENTAGE_FALLBACK;
+	else
+		data->minimum_battery = fu_common_strtoull (battery_str);
+	if (data->minimum_battery > 100) {
+		g_warning ("Invalid minimum battery level specified: %" G_GUINT64_FORMAT,
+			   data->minimum_battery);
+		data->minimum_battery = MINIMUM_BATTERY_PERCENTAGE_FALLBACK;
 	}
 
 	return TRUE;
@@ -96,7 +120,7 @@ fu_plugin_upower_check_percentage_level (FuPlugin *plugin)
 	level = g_variant_get_double (percentage_val);
 	g_debug ("System power source is %.1f%%", level);
 
-	return level >= MINIMUM_BATTERY_PERCENTAGE;
+	return level >= data->minimum_battery;
 }
 
 static gboolean
@@ -137,12 +161,13 @@ fu_plugin_update_prepare (FuPlugin *plugin,
 	/* deteremine if battery high enough */
 	if (!fu_plugin_upower_check_percentage_level (plugin) &&
 	   (flags & FWUPD_INSTALL_FLAG_FORCE) == 0) {
+		FuPluginData *data = fu_plugin_get_data (plugin);
 		g_set_error (error,
 			     FWUPD_ERROR,
 			     FWUPD_ERROR_BATTERY_LEVEL_TOO_LOW,
 			     "Cannot install update when battery "
-			     "is not at least %d%% unless forced",
-			      MINIMUM_BATTERY_PERCENTAGE);
+			     "is not at least %" G_GUINT64_FORMAT "%% unless forced",
+			      data->minimum_battery);
 		return FALSE;
 	}
 	return TRUE;

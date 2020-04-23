@@ -7,6 +7,7 @@
 #include "config.h"
 
 #include "fu-plugin-vfuncs.h"
+#include "fu-hash.h"
 
 struct FuPluginData {
 	GMutex			 mutex;
@@ -15,11 +16,7 @@ struct FuPluginData {
 void
 fu_plugin_init (FuPlugin *plugin)
 {
-	if (g_strcmp0 (g_getenv ("FWUPD_PLUGIN_TEST"), "build-hash") == 0)
-		fu_plugin_set_build_hash (plugin, "invalid");
-	else
-		fu_plugin_set_build_hash (plugin, FU_BUILD_HASH);
-	fu_plugin_add_rule (plugin, FU_PLUGIN_RULE_SUPPORTS_PROTOCOL, "com.acme.test");
+	fu_plugin_set_build_hash (plugin, FU_BUILD_HASH);
 	fu_plugin_alloc_data (plugin, sizeof (FuPluginData));
 	g_debug ("init");
 }
@@ -41,11 +38,14 @@ fu_plugin_coldplug (FuPlugin *plugin, GError **error)
 	fu_device_set_name (device, "Integrated_Webcam(TM)");
 	fu_device_add_icon (device, "preferences-desktop-keyboard");
 	fu_device_add_flag (device, FWUPD_DEVICE_FLAG_UPDATABLE);
+	fu_device_add_flag (device, FWUPD_DEVICE_FLAG_CAN_VERIFY);
+	fu_device_set_protocol (device, "com.acme.test");
 	fu_device_set_summary (device, "A fake webcam");
 	fu_device_set_vendor (device, "ACME Corp.");
 	fu_device_set_vendor_id (device, "USB:0x046D");
+	fu_device_set_version_format (device, FWUPD_VERSION_FORMAT_TRIPLET);
 	fu_device_set_version_bootloader (device, "0.1.2");
-	fu_device_set_version (device, "1.2.2", FWUPD_VERSION_FORMAT_TRIPLET);
+	fu_device_set_version (device, "1.2.2");
 	fu_device_set_version_lowest (device, "1.2.0");
 	if (g_strcmp0 (g_getenv ("FWUPD_PLUGIN_TEST"), "registration") == 0) {
 		fu_plugin_device_register (plugin, device);
@@ -64,21 +64,27 @@ fu_plugin_coldplug (FuPlugin *plugin, GError **error)
 		g_autoptr(FuDevice) child2 = NULL;
 
 		child1 = fu_device_new ();
+		fu_device_set_vendor_id (child1, "USB:FFFF");
+		fu_device_set_protocol (child1, "com.acme");
 		fu_device_set_physical_id (child1, "fake");
 		fu_device_set_logical_id (child1, "child1");
 		fu_device_add_guid (child1, "7fddead7-12b5-4fb9-9fa0-6d30305df755");
 		fu_device_set_name (child1, "Module1");
-		fu_device_set_version (child1, "1", FWUPD_VERSION_FORMAT_PLAIN);
+		fu_device_set_version_format (child1, FWUPD_VERSION_FORMAT_PLAIN);
+		fu_device_set_version (child1, "1");
 		fu_device_add_parent_guid (child1, "b585990a-003e-5270-89d5-3705a17f9a43");
 		fu_device_add_flag (child1, FWUPD_DEVICE_FLAG_UPDATABLE);
 		fu_plugin_device_add (plugin, child1);
 
 		child2 = fu_device_new ();
+		fu_device_set_vendor_id (child2, "USB:FFFF");
+		fu_device_set_protocol (child2, "com.acme");
 		fu_device_set_physical_id (child2, "fake");
 		fu_device_set_logical_id (child2, "child2");
 		fu_device_add_guid (child2, "b8fe6b45-8702-4bcd-8120-ef236caac76f");
 		fu_device_set_name (child2, "Module2");
-		fu_device_set_version (child2, "10", FWUPD_VERSION_FORMAT_PLAIN);
+		fu_device_set_version_format (child2, FWUPD_VERSION_FORMAT_PLAIN);
+		fu_device_set_version (child2, "10");
 		fu_device_add_parent_guid (child2, "b585990a-003e-5270-89d5-3705a17f9a43");
 		fu_device_add_flag (child2, FWUPD_DEVICE_FLAG_UPDATABLE);
 		fu_plugin_device_add (plugin, child2);
@@ -100,6 +106,11 @@ fu_plugin_verify (FuPlugin *plugin,
 		  FuPluginVerifyFlags flags,
 		  GError **error)
 {
+	if (g_strcmp0 (fu_device_get_version (device), "1.2.2") == 0) {
+		fu_device_add_checksum (device, "90d0ad436d21e0687998cd2127b2411135e1f730");
+		fu_device_add_checksum (device, "921631916a60b295605dbae6a0309f9b64e2401b3de8e8506e109fc82c586e3a");
+		return TRUE;
+	}
 	if (g_strcmp0 (fu_device_get_version (device), "1.2.3") == 0) {
 		fu_device_add_checksum (device, "7998cd212721e068b2411135e1f90d0ad436d730");
 		fu_device_add_checksum (device, "dbae6a0309b3de8e850921631916a60b2956056e109fc82c586e3f9b64e2401a");
@@ -115,6 +126,19 @@ fu_plugin_verify (FuPlugin *plugin,
 		     FWUPD_ERROR_NOT_SUPPORTED,
 		     "no checksum for %s", fu_device_get_version (device));
 	return FALSE;
+}
+
+static gchar *
+fu_plugin_test_get_version (GBytes *blob_fw)
+{
+	const gchar *str = g_bytes_get_data (blob_fw, NULL);
+	guint64 val = 0;
+	if (str == NULL)
+		return NULL;
+	val = fu_common_strtoull (str);
+	if (val == 0x0)
+		return NULL;
+	return fu_common_version_from_uint32 (val, FWUPD_VERSION_FORMAT_TRIPLET);
 }
 
 gboolean
@@ -151,11 +175,12 @@ fu_plugin_update (FuPlugin *plugin,
 
 	/* composite test, upgrade composite devices */
 	if (g_strcmp0 (test, "composite") == 0) {
+		fu_device_set_version_format (device, FWUPD_VERSION_FORMAT_PLAIN);
 		if (g_strcmp0 (fu_device_get_logical_id (device), "child1") == 0) {
-			fu_device_set_version (device, "2", FWUPD_VERSION_FORMAT_PLAIN);
+			fu_device_set_version (device, "2");
 			return TRUE;
 		} else if (g_strcmp0 (fu_device_get_logical_id (device), "child2") == 0) {
-			fu_device_set_version (device, "11", FWUPD_VERSION_FORMAT_PLAIN);
+			fu_device_set_version (device, "11");
 			return TRUE;
 		}
 	}
@@ -164,10 +189,16 @@ fu_plugin_update (FuPlugin *plugin,
 	if (requires_activation) {
 		fu_device_add_flag (device, FWUPD_DEVICE_FLAG_NEEDS_ACTIVATION);
 	} else {
-		if (flags & FWUPD_INSTALL_FLAG_ALLOW_OLDER) {
-			fu_device_set_version (device, "1.2.2", FWUPD_VERSION_FORMAT_TRIPLET);
+		g_autofree gchar *ver = fu_plugin_test_get_version (blob_fw);
+		fu_device_set_version_format (device, FWUPD_VERSION_FORMAT_TRIPLET);
+		if (ver != NULL) {
+			fu_device_set_version (device, ver);
 		} else {
-			fu_device_set_version (device, "1.2.3", FWUPD_VERSION_FORMAT_TRIPLET);
+			if (flags & FWUPD_INSTALL_FLAG_ALLOW_OLDER) {
+				fu_device_set_version (device, "1.2.2");
+			} else {
+				fu_device_set_version (device, "1.2.3");
+			}
 		}
 	}
 
@@ -187,7 +218,8 @@ fu_plugin_update (FuPlugin *plugin,
 gboolean
 fu_plugin_activate (FuPlugin *plugin, FuDevice *device, GError **error)
 {
-	fu_device_set_version (device, "1.2.3", FWUPD_VERSION_FORMAT_TRIPLET);
+	fu_device_set_version_format (device, FWUPD_VERSION_FORMAT_TRIPLET);
+	fu_device_set_version (device, "1.2.3");
 	return TRUE;
 }
 

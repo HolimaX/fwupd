@@ -28,17 +28,75 @@ jobs:
           paths:
             - "dist/docs"
 
-  build-snap:
-    docker:
-      - image: superm1/snapcraft-edge:latest
+  build-chromeos-x86_64:
+    machine:
+      image: circleci/classic:latest
     steps:
       - checkout
+      - run:
+          name: "Build container"
+          command: OS=debian-x86_64 ./contrib/ci/generate_docker.py
+      - run:
+          name: "Run build script"
+          command: docker run --privileged -e CI=true -t -v `pwd`/dist:/build/dist fwupd-debian-x86_64 ./contrib/ci/trust.sh
+
+  build-windows:
+    docker:
+      - image: fedora:31
+    steps:
+      - run:
+          name: "Install deps"
+          command: dnf install -y diffutils
+                                  glib2-devel
+                                  git-core
+                                  gnutls-utils
+                                  jq
+                                  meson
+                                  git
+                                  gcc
+                                  gcab
+                                  mingw32-nsis
+                                  mingw64-gcc
+                                  mingw64-pkg-config
+                                  mingw64-glib2
+                                  mingw64-libgusb
+                                  mingw64-sqlite
+                                  mingw64-libarchive
+                                  mingw64-json-glib
+                                  mingw64-libsoup
+                                  wine
+      - checkout
+      - run:
+          name: "Build Win32"
+          command: ./contrib/ci/build_windows.sh
+      - persist_to_workspace:
+          root: .
+          paths:
+            - "dist/setup/*.exe"
+            - "dist/VERSION"
+      - store_artifacts:
+          path: dist/setup
+
+  build-snap:
+    docker:
+      - image: ubuntu:18.04
+    steps:
       - run:
           name: "Update apt"
           command: apt update
       - run:
+          name: "install snapcraft"
+          command: apt install snapcraft git -y
+      - checkout
+      - run:
           name: "Build Snap"
           command: snapcraft
+      - run:
+          command: |
+            mkdir -p /tmp/snaps
+            cp *.snap /tmp/snaps
+      - store_artifacts:
+          path: /tmp/snaps
       - persist_to_workspace:
           root: .
           paths:
@@ -66,6 +124,7 @@ jobs:
             git config user.name "Documentation deployment Bot"
             rm -rf *
             cp ../html/* . -R
+            git add .
             git commit -a --allow-empty -m "Trigger deployment"
             git push git@github.com:fwupd/fwupd.github.io.git
 
@@ -95,13 +154,27 @@ jobs:
             echo $SNAPCRAFT_LOGIN_FILE | base64 --decode --ignore-garbage > .snapcraft/snapcraft.cfg
             snapcraft push *.snap --release stable
 
+  publish-github-exe-release:
+    docker:
+      - image: circleci/golang:1.9
+    steps:
+      - attach_workspace:
+          at: .
+      - run:
+          name: "Publish Release on GitHub"
+          command: |
+            go get github.com/tcnksm/ghr
+            VERSION=$(cat dist/VERSION)
+            ghr -t ${GITHUB_TOKEN} -u ${CIRCLE_PROJECT_USERNAME} -r ${CIRCLE_PROJECT_REPONAME} -c ${CIRCLE_SHA1} ${VERSION} ./dist/setup/
 workflows:
   version: 2
   main:
     jobs:
+      - build-windows
       - build-ubuntu-x86_64
       - build-snap
       - check-abi
+      - build-chromeos-x86_64
       - publish-edge:
           requires:
             - build-snap
@@ -111,6 +184,20 @@ workflows:
   deploy:
     jobs:
       - build-ubuntu-x86_64:
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /^\d+\.\d+\.\d+$/
+      - build-windows:
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /^\d+\.\d+\.\d+$/
+      - publish-github-exe-release:
+          requires:
+            - build-windows
           filters:
             branches:
               ignore: /.*/

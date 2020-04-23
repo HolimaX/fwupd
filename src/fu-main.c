@@ -15,7 +15,9 @@
 #include <glib-unix.h>
 #include <locale.h>
 #include <polkit/polkit.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <jcat.h>
 
 #include "fwupd-device-private.h"
 #include "fwupd-release-private.h"
@@ -42,6 +44,9 @@ typedef struct {
 	GDBusProxy		*proxy_uid;
 	GMainLoop		*loop;
 	GFileMonitor		*argv0_monitor;
+#if GLIB_CHECK_VERSION(2,63,3)
+	GMemoryMonitor		*memory_monitor;
+#endif
 	PolkitAuthority		*authority;
 	guint			 owner_id;
 	FuEngine		*engine;
@@ -725,9 +730,23 @@ fu_main_install_with_helper (FuMainAuthHelper *helper_ref, GError **error)
 			task = fu_install_task_new (device, component);
 			if (!fu_engine_check_requirements (priv->engine,
 							   task,
+							   helper->flags | FWUPD_INSTALL_FLAG_FORCE,
+							   &error_local)) {
+				g_debug ("first pass requirement on %s:%s failed: %s",
+					 fu_device_get_id (device),
+					 xb_node_query_text (component, "id", NULL),
+					 error_local->message);
+				g_ptr_array_add (errors, g_steal_pointer (&error_local));
+				continue;
+			}
+
+			/* make a second pass using possibly updated version format now */
+			fu_engine_md_refresh_device_from_component (priv->engine, device, component);
+			if (!fu_engine_check_requirements (priv->engine,
+							   task,
 							   helper->flags,
 							   &error_local)) {
-				g_debug ("requirement on %s:%s failed: %s",
+				g_debug ("second pass requirement on %s:%s failed: %s",
 					 fu_device_get_id (device),
 					 xb_node_query_text (component, "id", NULL),
 					 error_local->message);
@@ -882,10 +901,10 @@ fu_main_daemon_method_call (GDBusConnection *connection, const gchar *sender,
 			g_debug ("got option %s", prop_key);
 			if (g_strcmp0 (prop_key, "add-timestamp") == 0 &&
 			    g_variant_get_boolean (prop_value) == TRUE)
-				helper->flags |= FU_KEYRING_SIGN_FLAG_ADD_TIMESTAMP;
+				helper->flags |= JCAT_SIGN_FLAG_ADD_TIMESTAMP;
 			if (g_strcmp0 (prop_key, "add-cert") == 0 &&
 			    g_variant_get_boolean (prop_value) == TRUE)
-				helper->flags |= FU_KEYRING_SIGN_FLAG_ADD_CERT;
+				helper->flags |= JCAT_SIGN_FLAG_ADD_CERT;
 			g_variant_unref (prop_value);
 		}
 
@@ -1355,13 +1374,22 @@ fu_main_daemon_get_property (GDBusConnection *connection_, const gchar *sender,
 	fu_engine_idle_reset (priv->engine);
 
 	if (g_strcmp0 (property_name, "DaemonVersion") == 0)
-		return g_variant_new_string (VERSION);
+		return g_variant_new_string (SOURCE_VERSION);
 
 	if (g_strcmp0 (property_name, "Tainted") == 0)
 		return g_variant_new_boolean (fu_engine_get_tainted (priv->engine));
 
 	if (g_strcmp0 (property_name, "Status") == 0)
 		return g_variant_new_uint32 (fu_engine_get_status (priv->engine));
+
+	if (g_strcmp0 (property_name, "HostProduct") == 0)
+		return g_variant_new_string (fu_engine_get_host_product (priv->engine));
+
+	if (g_strcmp0 (property_name, "HostMachineId") == 0)
+		return g_variant_new_string (fu_engine_get_host_machine_id (priv->engine));
+
+	if (g_strcmp0 (property_name, "Interactive") == 0)
+		return g_variant_new_boolean (isatty (fileno (stdout)) != 0);
 
 	/* return an error */
 	g_set_error (error,
@@ -1454,6 +1482,23 @@ fu_main_argv_changed_cb (GFileMonitor *monitor, GFile *file, GFile *other_file,
 	g_main_loop_quit (priv->loop);
 }
 
+#if GLIB_CHECK_VERSION(2,63,3)
+static void
+fu_main_memory_monitor_warning_cb (GMemoryMonitor *memory_monitor,
+				   GMemoryMonitorWarningLevel level,
+				   FuMainPrivate *priv)
+{
+	/* can do straight away? */
+	if (priv->update_in_progress) {
+		g_warning ("OOM during a firmware update, ignoring");
+		priv->pending_sigterm = TRUE;
+		return;
+	}
+	g_debug ("OOM event, shutting down");
+	g_main_loop_quit (priv->loop);
+}
+#endif
+
 static GDBusNodeInfo *
 fu_main_load_introspection (const gchar *filename, GError **error)
 {
@@ -1492,6 +1537,10 @@ fu_main_private_free (FuMainPrivate *priv)
 		g_object_unref (priv->argv0_monitor);
 	if (priv->introspection_daemon != NULL)
 		g_dbus_node_info_unref (priv->introspection_daemon);
+#if GLIB_CHECK_VERSION(2,63,3)
+	if (priv->memory_monitor != NULL)
+		g_object_unref (priv->memory_monitor);
+#endif
 	g_free (priv);
 }
 
@@ -1521,7 +1570,7 @@ main (int argc, char *argv[])
 
 	setlocale (LC_ALL, "");
 
-	bindtextdomain (GETTEXT_PACKAGE, LOCALEDIR);
+	bindtextdomain (GETTEXT_PACKAGE, FWUPD_LOCALEDIR);
 	bind_textdomain_codeset (GETTEXT_PACKAGE, "UTF-8");
 	textdomain (GETTEXT_PACKAGE);
 
@@ -1575,6 +1624,13 @@ main (int argc, char *argv[])
 						   NULL, &error);
 	g_signal_connect (priv->argv0_monitor, "changed",
 			  G_CALLBACK (fu_main_argv_changed_cb), priv);
+
+#if GLIB_CHECK_VERSION(2,63,3)
+	/* shut down on low memory event as we can just rescan hardware */
+	priv->memory_monitor = g_memory_monitor_dup_default ();
+	g_signal_connect (G_OBJECT (priv->memory_monitor), "low-memory-warning",
+			  G_CALLBACK (fu_main_memory_monitor_warning_cb), priv);
+#endif
 
 	/* load introspection from file */
 	priv->introspection_daemon = fu_main_load_introspection (FWUPD_DBUS_INTERFACE ".xml",

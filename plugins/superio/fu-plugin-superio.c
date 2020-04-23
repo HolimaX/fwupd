@@ -7,6 +7,7 @@
 #include "config.h"
 
 #include "fu-plugin-vfuncs.h"
+#include "fu-hash.h"
 
 #include "fu-superio-it85-device.h"
 #include "fu-superio-it89-device.h"
@@ -16,6 +17,7 @@
 static gboolean
 fu_plugin_superio_coldplug_chipset (FuPlugin *plugin, const gchar *chipset, GError **error)
 {
+	const gchar *dmi_vendor;
 	g_autoptr(FuSuperioDevice) dev = NULL;
 	g_autoptr(FuDeviceLocker) locker = NULL;
 	g_autofree gchar *key = g_strdup_printf ("SuperIO=%s", chipset);
@@ -45,12 +47,14 @@ fu_plugin_superio_coldplug_chipset (FuPlugin *plugin, const gchar *chipset, GErr
 	/* create IT89xx or IT89xx */
 	if (id >> 8 == 0x85) {
 		dev = g_object_new (FU_TYPE_SUPERIO_IT85_DEVICE,
+				    "device-file", "/dev/port",
 				    "chipset", chipset,
 				    "id", id,
 				    "port", port,
 				    NULL);
 	} else if (id >> 8 == 0x89) {
 		dev = g_object_new (FU_TYPE_SUPERIO_IT89_DEVICE,
+				    "device-file", "/dev/port",
 				    "chipset", chipset,
 				    "id", id,
 				    "port", port,
@@ -61,6 +65,13 @@ fu_plugin_superio_coldplug_chipset (FuPlugin *plugin, const gchar *chipset, GErr
 			     G_IO_ERROR_NOT_SUPPORTED,
 			     "SuperIO chip %s has unsupported Id", chipset);
 		return FALSE;
+	}
+
+	/* set vendor ID as the motherboard vendor */
+	dmi_vendor = fu_plugin_get_dmi_value (plugin, FU_HWIDS_KEY_BASEBOARD_MANUFACTURER);
+	if (dmi_vendor != NULL) {
+		g_autofree gchar *vendor_id = g_strdup_printf ("DMI:%s", dmi_vendor);
+		fu_device_set_vendor_id (FU_DEVICE (dev), vendor_id);
 	}
 
 	/* unlock */
@@ -87,13 +98,22 @@ void
 fu_plugin_init (FuPlugin *plugin)
 {
 	fu_plugin_set_build_hash (plugin, FU_BUILD_HASH);
-	fu_plugin_add_rule (plugin, FU_PLUGIN_RULE_SUPPORTS_PROTOCOL, "tw.com.ite.superio");
 }
 
 gboolean
 fu_plugin_coldplug (FuPlugin *plugin, GError **error)
 {
-	GPtrArray *hwids = fu_plugin_get_hwids (plugin);
+	GPtrArray *hwids;
+
+	if (fu_common_kernel_locked_down ()) {
+		g_set_error_literal (error,
+				     FWUPD_ERROR,
+				     FWUPD_ERROR_NOT_SUPPORTED,
+				     "not supported when kernel locked down");
+		return FALSE;
+	}
+
+	hwids = fu_plugin_get_hwids (plugin);
 	for (guint i = 0; i < hwids->len; i++) {
 		const gchar *tmp;
 		const gchar *guid = g_ptr_array_index (hwids, i);
@@ -105,87 +125,4 @@ fu_plugin_coldplug (FuPlugin *plugin, GError **error)
 			return FALSE;
 	}
 	return TRUE;
-}
-
-gboolean
-fu_plugin_verify_attach (FuPlugin *plugin, FuDevice *device, GError **error)
-{
-	g_autoptr(FuDeviceLocker) locker = NULL;
-	locker = fu_device_locker_new (device, error);
-	if (locker == NULL)
-		return FALSE;
-	return fu_device_attach (device, error);
-}
-
-gboolean
-fu_plugin_verify_detach (FuPlugin *plugin, FuDevice *device, GError **error)
-{
-	g_autoptr(FuDeviceLocker) locker = NULL;
-	if (fu_device_has_flag (device, FWUPD_DEVICE_FLAG_IS_BOOTLOADER))
-		return TRUE;
-	locker = fu_device_locker_new (device, error);
-	if (locker == NULL)
-		return FALSE;
-	return fu_device_detach (device, error);
-}
-
-gboolean
-fu_plugin_verify (FuPlugin *plugin, FuDevice *device,
-		  FuPluginVerifyFlags flags, GError **error)
-{
-	g_autoptr(GBytes) fw = NULL;
-	g_autoptr(FuDeviceLocker) locker = NULL;
-	GChecksumType checksum_types[] = {
-		G_CHECKSUM_SHA1,
-		G_CHECKSUM_SHA256,
-		0 };
-
-	/* get data */
-	locker = fu_device_locker_new (device, error);
-	if (locker == NULL)
-		return FALSE;
-	fw = fu_device_read_firmware (device, error);
-	if (fw == NULL)
-		return FALSE;
-	for (guint i = 0; checksum_types[i] != 0; i++) {
-		g_autofree gchar *hash = NULL;
-		hash = g_compute_checksum_for_bytes (checksum_types[i], fw);
-		fu_device_add_checksum (device, hash);
-	}
-	return TRUE;
-}
-
-gboolean
-fu_plugin_update_detach (FuPlugin *plugin, FuDevice *device, GError **error)
-{
-	g_autoptr(FuDeviceLocker) locker = NULL;
-	if (fu_device_has_flag (device, FWUPD_DEVICE_FLAG_IS_BOOTLOADER))
-		return TRUE;
-	locker = fu_device_locker_new (device, error);
-	if (locker == NULL)
-		return FALSE;
-	return fu_device_detach (device, error);
-}
-
-gboolean
-fu_plugin_update_attach (FuPlugin *plugin, FuDevice *device, GError **error)
-{
-	g_autoptr(FuDeviceLocker) locker = fu_device_locker_new (device, error);
-	if (locker == NULL)
-		return FALSE;
-	return fu_device_attach (device, error);
-}
-
-gboolean
-fu_plugin_update (FuPlugin *plugin,
-		  FuDevice *device,
-		  GBytes *blob_fw,
-		  FwupdInstallFlags flags,
-		  GError **error)
-{
-	g_autoptr(FuDeviceLocker) locker = NULL;
-	locker = fu_device_locker_new (device, error);
-	if (locker == NULL)
-		return FALSE;
-	return fu_device_write_firmware (device, blob_fw, flags, error);
 }

@@ -14,6 +14,7 @@
 #include "fu-plugin-private.h"
 #include "fu-plugin-dell.h"
 #include "fu-plugin-vfuncs.h"
+#include "fu-hash.h"
 
 static FuDevice *
 _find_device_by_id (GPtrArray *devices, const gchar *device_id)
@@ -68,16 +69,26 @@ fu_plugin_dell_tpm_func (void)
 	const guint8 fw[30] = { 'F', 'W', 0x00 };
 	gboolean ret;
 	struct tpm_status tpm_out;
+	const gchar *tpm_server_running = g_getenv ("TPM_SERVER_RUNNING");
+	g_autofree gchar *pluginfn_uefi = NULL;
+	g_autofree gchar *pluginfn_dell = NULL;
 	g_autoptr(FuPlugin) plugin_dell = NULL;
 	g_autoptr(FuPlugin) plugin_uefi = NULL;
 	g_autoptr(GBytes) blob_fw = g_bytes_new_static (fw, sizeof(fw));
 	g_autoptr(GError) error = NULL;
 	g_autoptr(GPtrArray) devices = NULL;
 
+	pluginfn_uefi = g_build_filename (PLUGINBUILDDIR, "..", "uefi",
+					  "libfu_plugin_uefi." G_MODULE_SUFFIX,
+					  NULL);
+	pluginfn_dell = g_build_filename (PLUGINBUILDDIR,
+					  "libfu_plugin_dell." G_MODULE_SUFFIX,
+					  NULL);
+
 	memset (&tpm_out, 0x0, sizeof(tpm_out));
 
 	plugin_uefi = fu_plugin_new ();
-	ret = fu_plugin_open (plugin_uefi, PLUGINBUILDDIR "/../uefi/libfu_plugin_uefi.so", &error);
+	ret = fu_plugin_open (plugin_uefi, pluginfn_uefi, &error);
 	g_assert_no_error (error);
 	g_assert (ret);
 	ret = fu_plugin_runner_startup (plugin_uefi, &error);
@@ -89,7 +100,7 @@ fu_plugin_dell_tpm_func (void)
 			  devices);
 
 	plugin_dell = fu_plugin_new ();
-	ret = fu_plugin_open (plugin_dell, PLUGINBUILDDIR "/libfu_plugin_dell.so", &error);
+	ret = fu_plugin_open (plugin_dell, pluginfn_dell, &error);
 	g_assert_no_error (error);
 	g_assert (ret);
 	ret = fu_plugin_runner_startup (plugin_dell, &error);
@@ -101,6 +112,14 @@ fu_plugin_dell_tpm_func (void)
 	ret = fu_plugin_runner_coldplug (plugin_dell, &error);
 	g_assert_no_error (error);
 	g_assert (ret);
+
+#ifdef HAVE_GETUID
+	if (tpm_server_running == NULL &&
+	    (getuid () != 0 || geteuid () != 0)) {
+		g_test_skip ("TPM tests require simulated TPM2.0 running or need root access with physical TPM");
+		return;
+	}
+#endif
 
 	/* inject fake data (no TPM) */
 	tpm_out.ret = -2;
@@ -130,12 +149,12 @@ fu_plugin_dell_tpm_func (void)
 	g_assert_cmpint (devices->len, ==, 2);
 
 	/* make sure 2.0 is locked */
-	device_v20 = _find_device_by_name (devices, "Unknown TPM 2.0");
+	device_v20 = _find_device_by_name (devices, "TPM 2.0");
 	g_assert_nonnull (device_v20);
 	g_assert_true (fu_device_has_flag (device_v20, FWUPD_DEVICE_FLAG_LOCKED));
 
 	/* make sure not allowed to flash 1.2 */
-	device_v12 = _find_device_by_name (devices, "Unknown TPM 1.2");
+	device_v12 = _find_device_by_name (devices, "TPM 1.2");
 	g_assert_nonnull (device_v12);
 	g_assert_false (fu_device_has_flag (device_v12, FWUPD_DEVICE_FLAG_UPDATABLE));
 
@@ -164,12 +183,12 @@ fu_plugin_dell_tpm_func (void)
 	g_assert (ret);
 
 	/* make sure not allowed to flash 1.2 */
-	device_v12 = _find_device_by_name (devices, "Unknown TPM 1.2");
+	device_v12 = _find_device_by_name (devices, "TPM 1.2");
 	g_assert_nonnull (device_v12);
 	g_assert_false (fu_device_has_flag (device_v12, FWUPD_DEVICE_FLAG_UPDATABLE));
 
 	/* try to unlock 2.0 */
-	device_v20 = _find_device_by_name (devices, "Unknown TPM 2.0");
+	device_v20 = _find_device_by_name (devices, "TPM 2.0");
 	g_assert_nonnull (device_v20);
 	ret = fu_plugin_runner_unlock (plugin_uefi, device_v20, &error);
 	g_assert_error (error, FWUPD_ERROR, FWUPD_ERROR_NOT_SUPPORTED);
@@ -195,10 +214,10 @@ fu_plugin_dell_tpm_func (void)
 	g_assert (ret);
 
 	/* make sure allowed to flash 1.2 but not 2.0 */
-	device_v12 = _find_device_by_name (devices, "Unknown TPM 1.2");
+	device_v12 = _find_device_by_name (devices, "TPM 1.2");
 	g_assert_nonnull (device_v12);
 	g_assert_true (fu_device_has_flag (device_v12, FWUPD_DEVICE_FLAG_UPDATABLE));
-	device_v20 = _find_device_by_name (devices, "Unknown TPM 2.0");
+	device_v20 = _find_device_by_name (devices, "TPM 2.0");
 	g_assert_nonnull (device_v20);
 	g_assert_false (fu_device_has_flag (device_v20, FWUPD_DEVICE_FLAG_UPDATABLE));
 
@@ -230,10 +249,10 @@ fu_plugin_dell_tpm_func (void)
 	g_assert (ret);
 
 	/* make sure allowed to flash 2.0 but not 1.2 */
-	device_v20 = _find_device_by_name (devices, "Unknown TPM 2.0");
+	device_v20 = _find_device_by_name (devices, "TPM 2.0");
 	g_assert_nonnull (device_v20);
 	g_assert_true (fu_device_has_flag (device_v20, FWUPD_DEVICE_FLAG_UPDATABLE));
-	device_v12 = _find_device_by_name (devices, "Unknown TPM 1.2");
+	device_v12 = _find_device_by_name (devices, "TPM 1.2");
 	g_assert_nonnull (device_v12);
 	g_assert_false (fu_device_has_flag (device_v12, FWUPD_DEVICE_FLAG_UPDATABLE));
 
@@ -261,12 +280,21 @@ fu_plugin_dell_dock_func (void)
 	guint32 out[4] = { 0x0, 0x0, 0x0, 0x0 };
 	DOCK_UNION buf;
 	DOCK_INFO *dock_info;
+	g_autofree gchar *pluginfn_uefi = NULL;
+	g_autofree gchar *pluginfn_dell = NULL;
 	g_autoptr(GError) error = NULL;
 	g_autoptr(GPtrArray) devices = NULL;
 	g_autoptr(FuPlugin) plugin_uefi = fu_plugin_new ();
 	g_autoptr(FuPlugin) plugin_dell = fu_plugin_new ();
 
-	ret = fu_plugin_open (plugin_uefi, PLUGINBUILDDIR "/../uefi/libfu_plugin_uefi.so", &error);
+	pluginfn_uefi = g_build_filename (PLUGINBUILDDIR, "..", "uefi",
+					  "libfu_plugin_uefi." G_MODULE_SUFFIX,
+					  NULL);
+	pluginfn_dell = g_build_filename (PLUGINBUILDDIR,
+					  "libfu_plugin_dell." G_MODULE_SUFFIX,
+					  NULL);
+
+	ret = fu_plugin_open (plugin_uefi, pluginfn_uefi, &error);
 	g_assert_no_error (error);
 	g_assert (ret);
 	ret = fu_plugin_runner_startup (plugin_uefi, &error);
@@ -276,7 +304,7 @@ fu_plugin_dell_dock_func (void)
 	g_signal_connect (plugin_uefi, "device-added",
 			  G_CALLBACK (_plugin_device_added_cb),
 			  devices);
-	ret = fu_plugin_open (plugin_dell, PLUGINBUILDDIR "/libfu_plugin_dell.so", &error);
+	ret = fu_plugin_open (plugin_dell, pluginfn_dell, &error);
 	g_assert_no_error (error);
 	g_assert (ret);
 	ret = fu_plugin_runner_startup (plugin_dell, &error);
@@ -484,6 +512,7 @@ main (int argc, char **argv)
 	/* change behaviour */
 	sysfsdir = fu_common_get_path (FU_PATH_KIND_SYSFSDIR_FW);
 	g_setenv ("FWUPD_UEFI_ESP_PATH", sysfsdir, TRUE);
+	g_setenv ("FWUPD_UEFI_TEST", "1", TRUE);
 	g_setenv ("FWUPD_DELL_FAKE_SMBIOS", "1", FALSE);
 
 	/* only critical and error are fatal */

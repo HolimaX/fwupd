@@ -7,17 +7,12 @@
 #pragma once
 
 #include "fu-plugin.h"
-
-G_BEGIN_DECLS
+#include "fu-hid-device.h"
 
 #define FU_TYPE_NITROKEY_DEVICE (fu_nitrokey_device_get_type ())
-G_DECLARE_DERIVABLE_TYPE (FuNitrokeyDevice, fu_nitrokey_device, FU, NITROKEY_DEVICE, FuUsbDevice)
+G_DECLARE_DERIVABLE_TYPE (FuNitrokeyDevice, fu_nitrokey_device, FU, NITROKEY_DEVICE, FuHidDevice)
 
 struct _FuNitrokeyDeviceClass
 {
-	FuUsbDeviceClass	parent_class;
+	FuHidDeviceClass	parent_class;
 };
-
-FuNitrokeyDevice *fu_nitrokey_device_new	(FuUsbDevice		*device);
-
-G_END_DECLS

@@ -11,14 +11,15 @@ shared_module('fu_plugin_dell',
     'fu-dell-smi.c',
   ],
   include_directories : [
-    include_directories('../..'),
-    include_directories('../../src'),
-    include_directories('../../libfwupd'),
+    root_incdir,
+    fwupd_incdir,
+    fwupdplugin_incdir,
   ],
   install : true,
   install_dir: plugin_dir,
   link_with : [
-    libfwupdprivate,
+    fwupd,
+    fwupdplugin,
   ],
   c_args : [
     cargs,
@@ -27,13 +28,13 @@ shared_module('fu_plugin_dell',
     plugin_deps,
     efivar,
     libsmbios_c,
+    tpm2tss,
   ],
 )
 
 if get_option('tests')
   testdatadir = join_paths(meson.current_source_dir(), 'tests')
   cargs += '-DTESTDATADIR="' + testdatadir + '"'
-  cargs += '-DFU_OFFLINE_DESTDIR="/tmp/fwupd-self-test"'
   cargs += '-DPLUGINBUILDDIR="' + meson.current_build_dir() + '"'
   e = executable(
     'dell-self-test',
@@ -44,9 +45,9 @@ if get_option('tests')
       'fu-plugin-dell.c',
     ],
     include_directories : [
-      include_directories('../..'),
-      include_directories('../../src'),
-      include_directories('../../libfwupd'),
+      root_incdir,
+      fwupd_incdir,
+      fwupdplugin_incdir,
     ],
     dependencies : [
       plugin_deps,
@@ -54,9 +55,11 @@ if get_option('tests')
       sqlite,
       libsmbios_c,
       valgrind,
+      tpm2tss,
     ],
     link_with : [
-      libfwupdprivate,
+      fwupd,
+      fwupdplugin,
     ],
     c_args : [
       cargs,

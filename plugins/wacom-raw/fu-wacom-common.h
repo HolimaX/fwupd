@@ -8,9 +8,6 @@
 
 #include <glib-object.h>
 
-G_BEGIN_DECLS
-
-#define FU_WACOM_DEVICE_VID			0x056A
 #define FU_WACOM_RAW_CMD_RETRIES		1000
 
 #define FU_WACOM_RAW_STATUS_REPORT_ID		0x04
@@ -21,8 +18,8 @@ G_BEGIN_DECLS
 #define FU_WACOM_RAW_FW_CMD_DETACH		0x02
 #define FU_WACOM_RAW_FW_REPORT_SZ		2
 
-#define FU_WACOM_RAW_FW_MAINTAIN_REPORT_ID	0x09
-#define FU_WACOM_RAW_FW_MAINTAIN_REPORT_SZ	64
+#define FU_WACOM_RAW_BL_START_ADDR		(0x11FF8)
+#define FU_WACOM_RAW_BL_BYTES_CHECK		8
 
 #define FU_WACOM_RAW_BL_REPORT_ID_SET		0x07
 #define FU_WACOM_RAW_BL_REPORT_ID_GET		0x08
@@ -73,5 +70,3 @@ gboolean	 fu_wacom_common_check_reply	(const FuWacomRawRequest *req,
 						 GError		**error);
 gboolean	 fu_wacom_common_block_is_empty	(const guint8	*data,
 						 guint16	 datasz);
-
-G_END_DECLS

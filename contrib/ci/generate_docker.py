@@ -7,39 +7,22 @@
 import os
 import subprocess
 import sys
-import xml.etree.ElementTree as etree
 import tempfile
+import shutil
+from generate_dependencies import parse_dependencies
 
-def parse_dependencies(OS, SUBOS, requested_type):
-    deps = []
-    dep = ''
-    tree = etree.parse(os.path.join(directory, "dependencies.xml"))
-    root = tree.getroot()
-    for child in root:
-        if not "type" in child.attrib or not "id" in child.attrib:
-            continue
-        for distro in child:
-            if not "id" in distro.attrib:
-                continue
-            if distro.attrib["id"] != OS:
-                continue
-            packages = distro.findall("package")
-            for package in packages:
-                if SUBOS:
-                    if not 'variant' in package.attrib:
-                        continue
-                    if package.attrib['variant'] != SUBOS:
-                        continue
-                if package.text:
-                    dep = package.text
-                else:
-                    dep = child.attrib["id"]
-                if child.attrib["type"] == requested_type and dep:
-                    deps.append(dep)
-    return deps
+
+def get_container_cmd():
+    '''return docker or podman as container manager'''
+
+    if shutil.which('docker'):
+        return 'docker'
+    if shutil.which('podman'):
+        return 'podman'
+
 
 directory = os.path.dirname(sys.argv[0])
-TARGET=os.getenv('OS')
+TARGET = os.getenv('OS')
 
 if TARGET is None:
     print("Missing OS environment variable")
@@ -77,29 +60,34 @@ with open(out.name, 'w') as wfd:
                 wfd.write("RUN yum -y install \\\n")
             elif OS == "debian" or OS == "ubuntu":
                 wfd.write("RUN apt update -qq && \\\n")
-                wfd.write("\tapt install -yq --no-install-recommends\\\n")
+                wfd.write(
+                    "\tDEBIAN_FRONTEND=noninteractive apt install -yq --no-install-recommends\\\n"
+                )
             elif OS == "arch":
-                wfd.write("RUN pacman -Syu --noconfirm \\\n")
+                wfd.write("RUN pacman -Syu --noconfirm --needed\\\n")
             for i in range(0, len(deps)):
-                if i < len(deps)-1:
+                if i < len(deps) - 1:
                     wfd.write("\t%s \\\n" % deps[i])
                 else:
                     wfd.write("\t%s \n" % deps[i])
         elif line == "%%%ARCH_SPECIFIC_COMMAND%%%\n":
             if OS == "debian" and SUBOS == "s390x":
-                #add sources
-                wfd.write('RUN cat /etc/apt/sources.list | sed "s/deb/deb-src/" >> /etc/apt/sources.list\n')
-                #add new architecture
+                # add sources
+                wfd.write(
+                    'RUN cat /etc/apt/sources.list | sed "s/deb/deb-src/" >> /etc/apt/sources.list\n'
+                )
+                # add new architecture
                 wfd.write('RUN dpkg --add-architecture %s\n' % SUBOS)
         elif line == "%%%OS%%%\n":
             wfd.write("ENV OS %s\n" % TARGET)
         else:
             wfd.write(line)
     wfd.flush()
-    args = ["docker", "build", "-t", "fwupd-%s" % TARGET]
+    cmd = get_container_cmd()
+    args = [cmd, "build", "-t", "fwupd-%s" % TARGET]
     if 'http_proxy' in os.environ:
         args += ['--build-arg=http_proxy=%s' % os.environ['http_proxy']]
     if 'https_proxy' in os.environ:
         args += ['--build-arg=https_proxy=%s' % os.environ['https_proxy']]
-    args += [ "-f", "./%s" % os.path.basename(out.name), "."]
+    args += ["-f", "./%s" % os.path.basename(out.name), "."]
     subprocess.check_call(args)

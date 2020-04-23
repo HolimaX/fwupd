@@ -23,11 +23,44 @@
     </property>
 
     <!--***********************************************************-->
+    <property name='HostProduct' type='s' access='read'>
+      <doc:doc>
+        <doc:description>
+          <doc:para>
+            The product name string for the host.
+          </doc:para>
+        </doc:description>
+      </doc:doc>
+    </property>
+
+    <!--***********************************************************-->
+    <property name='HostMachineId' type='s' access='read'>
+      <doc:doc>
+        <doc:description>
+          <doc:para>
+            The machine ID for the host.
+          </doc:para>
+        </doc:description>
+      </doc:doc>
+    </property>
+
+    <!--***********************************************************-->
     <property name='Tainted' type='b' access='read'>
       <doc:doc>
         <doc:description>
           <doc:para>
             If the daemon has been tainted with a 3rd party plugin.
+          </doc:para>
+        </doc:description>
+      </doc:doc>
+    </property>
+
+    <!--***********************************************************-->
+    <property name='Interactive' type='b' access='read'>
+      <doc:doc>
+        <doc:description>
+          <doc:para>
+            If the daemon is running on an interactive terminal.
           </doc:para>
         </doc:description>
       </doc:doc>

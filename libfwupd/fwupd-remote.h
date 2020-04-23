@@ -64,12 +64,16 @@ const gchar	*fwupd_remote_get_metadata_uri		(FwupdRemote	*self);
 const gchar	*fwupd_remote_get_metadata_uri_sig	(FwupdRemote	*self);
 gboolean	 fwupd_remote_get_enabled		(FwupdRemote	*self);
 gboolean	 fwupd_remote_get_approval_required	(FwupdRemote	*self);
+gboolean	 fwupd_remote_get_automatic_reports	(FwupdRemote	*self);
 gint		 fwupd_remote_get_priority		(FwupdRemote	*self);
 guint64		 fwupd_remote_get_age			(FwupdRemote	*self);
 FwupdRemoteKind	 fwupd_remote_get_kind			(FwupdRemote	*self);
 FwupdKeyringKind fwupd_remote_get_keyring_kind		(FwupdRemote	*self);
 gchar		*fwupd_remote_build_firmware_uri	(FwupdRemote	*self,
 							 const gchar	*url,
+							 GError		**error);
+gboolean	 fwupd_remote_load_signature		(FwupdRemote	*self,
+							 const gchar	*filename,
 							 GError		**error);
 
 FwupdRemote	*fwupd_remote_from_variant		(GVariant	*value);

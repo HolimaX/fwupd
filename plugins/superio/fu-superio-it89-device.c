@@ -111,7 +111,7 @@ fu_superio_it89_device_setup (FuSuperioDevice *self, GError **error)
 		return FALSE;
 	}
 	version = g_strdup_printf ("%02u.%02u", version_tmp[0], version_tmp[1]);
-	fu_device_set_version (FU_DEVICE (self), version, FWUPD_VERSION_FORMAT_PAIR);
+	fu_device_set_version (FU_DEVICE (self), version);
 
 	/* get size from the EC */
 	if (!fu_superio_it89_device_ec_size (self, error))
@@ -417,18 +417,20 @@ fu_plugin_superio_fix_signature (FuSuperioDevice *self, GBytes *fw, GError **err
 	return g_bytes_new_take (g_steal_pointer (&buf2), sz);
 }
 
-static GBytes *
+static FuFirmware *
 fu_superio_it89_device_read_firmware (FuDevice *device, GError **error)
 {
 	FuSuperioDevice *self = FU_SUPERIO_DEVICE (device);
 	guint64 fwsize = fu_device_get_firmware_size_min (device);
 	g_autoptr(GBytes) blob = NULL;
+	g_autoptr(GBytes) fw = NULL;
 
 	fu_device_set_status (device, FWUPD_STATUS_DEVICE_READ);
 	blob = fu_superio_it89_device_read_addr (self, 0x0, fwsize,
 						 fu_superio_it89_device_progress_cb,
 						 error);
-	return fu_plugin_superio_fix_signature (self, blob, error);
+	fw = fu_plugin_superio_fix_signature (self, blob, error);
+	return fu_firmware_new_from_bytes (fw);
 }
 
 static gboolean
@@ -466,7 +468,7 @@ fu_superio_it89_device_detach (FuDevice *device, GError **error)
 	}
 
 	/* success */
-	fu_device_add_flag (self, FWUPD_DEVICE_FLAG_IS_BOOTLOADER);
+	fu_device_add_flag (device, FWUPD_DEVICE_FLAG_IS_BOOTLOADER);
 	return TRUE;
 }
 
@@ -668,6 +670,7 @@ fu_superio_it89_device_init (FuSuperioIt89Device *self)
 	fu_device_add_flag (FU_DEVICE (self), FWUPD_DEVICE_FLAG_ONLY_OFFLINE);
 	fu_device_add_flag (FU_DEVICE (self), FWUPD_DEVICE_FLAG_REQUIRE_AC);
 	fu_device_add_flag (FU_DEVICE (self), FWUPD_DEVICE_FLAG_NEEDS_REBOOT);
+	fu_device_set_version_format (FU_DEVICE (self), FWUPD_VERSION_FORMAT_PAIR);
 }
 
 static void

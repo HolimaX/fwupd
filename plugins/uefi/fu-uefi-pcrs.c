@@ -6,7 +6,9 @@
 
 #include "config.h"
 
+#ifdef HAVE_TSS2
 #include <tss2/tss2_esys.h>
+#endif
 
 #include "fu-common.h"
 #include "fu-uefi-pcrs.h"
@@ -24,11 +26,13 @@ struct _FuUefiPcrs {
 
 G_DEFINE_TYPE (FuUefiPcrs, fu_uefi_pcrs, G_TYPE_OBJECT)
 
+#ifdef HAVE_TSS2
 static void Esys_Finalize_autoptr_cleanup (ESYS_CONTEXT *esys_context)
 {
 	Esys_Finalize (&esys_context);
 }
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (ESYS_CONTEXT, Esys_Finalize_autoptr_cleanup)
+#endif
 
 static gboolean
 _g_string_isxdigit (GString *str)
@@ -104,6 +108,7 @@ fu_uefi_pcrs_setup_tpm12 (FuUefiPcrs *self, const gchar *fn_pcrs, GError **error
 static gboolean
 fu_uefi_pcrs_setup_tpm20 (FuUefiPcrs *self, GError **error)
 {
+#ifdef HAVE_TSS2
 	TSS2_RC rc;
 	g_autoptr(ESYS_CONTEXT) ctx = NULL;
 	g_autofree TPMS_CAPABILITY_DATA *capability_data = NULL;
@@ -112,7 +117,7 @@ fu_uefi_pcrs_setup_tpm20 (FuUefiPcrs *self, GError **error)
 
 	/* suppress warning messages about missing TCTI libraries for tpm2-tss <2.3 */
 	if (g_getenv ("FWUPD_UEFI_VERBOSE") == NULL) {
-		g_setenv ("TSS2_LOG", "esys+error", FALSE);
+		g_setenv ("TSS2_LOG", "esys+error,tcti+none", FALSE);
 	}
 
 	rc = Esys_Initialize (&ctx, NULL, NULL);
@@ -161,15 +166,19 @@ fu_uefi_pcrs_setup_tpm20 (FuUefiPcrs *self, GError **error)
 
 		str = g_string_new (NULL);
 		for (guint j = 0; j < pcr_values->digests[i].size; j++) {
-			g_string_append_printf (str, "%02x", pcr_values->digests[i].buffer[j]);
+			gint64 val = pcr_values->digests[i].buffer[j];
+			if (val > 0)
+				g_string_append_printf (str, "%02x", pcr_values->digests[i].buffer[j]);
 		}
-
-		item = g_new0 (FuUefiPcrItem, 1);
-		item->idx = 0; /* constant PCR index 0, since we only read this single PCR */
-		item->checksum = g_string_free (g_steal_pointer (&str), FALSE);
-		g_ptr_array_add (self->items, item);
-		g_debug ("added PCR-%02u=%s", item->idx, item->checksum);
+		if (str->len > 0) {
+			item = g_new0 (FuUefiPcrItem, 1);
+			item->idx = 0; /* constant PCR index 0, since we only read this single PCR */
+			item->checksum = g_string_free (g_steal_pointer (&str), FALSE);
+			g_ptr_array_add (self->items, item);
+			g_debug ("added PCR-%02u=%s", item->idx, item->checksum);
+		}
 	}
+#endif
 
 	/* success */
 	return TRUE;
@@ -188,7 +197,8 @@ fu_uefi_pcrs_setup (FuUefiPcrs *self, GError **error)
 	sysfstpmdir = fu_common_get_path (FU_PATH_KIND_SYSFSDIR_TPM);
 	devpath = g_build_filename (sysfstpmdir, "tpm0", NULL);
 	fn_pcrs = g_build_filename (devpath, "pcrs", NULL);
-	if (g_file_test (fn_pcrs, G_FILE_TEST_EXISTS)) {
+	if (g_file_test (fn_pcrs, G_FILE_TEST_EXISTS) &&
+	    g_getenv ("FWUPD_FORCE_TPM2") == NULL) {
 		if (!fu_uefi_pcrs_setup_tpm12 (self, fn_pcrs, error))
 			return FALSE;
 

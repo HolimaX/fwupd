@@ -1,19 +1,17 @@
 [Unit]
 Description=Refresh fwupd metadata and update motd
 Documentation=man:fwupdmgr(1)
-After=network.target network-online.target systemd-networkd.service NetworkManager.service connman.service
+After=network.target
 
 [Service]
 Type=oneshot
-RuntimeDirectory=@motd_dir@
-CacheDirectory=fwupd
-RuntimeDirectoryPreserve=yes
+CacheDirectory=fwupdmgr
 StandardError=null
-ExecStart=@bindir@/fwupdmgr refresh
-ExecStart=@bindir@/fwupdmgr get-updates --log @motd_file@
 DynamicUser=yes
 RestrictAddressFamilies=AF_NETLINK AF_UNIX AF_INET AF_INET6
 SystemCallFilter=~@mount
 ProtectKernelModules=yes
 ProtectControlGroups=yes
 RestrictRealtime=yes
+SuccessExitStatus=2
+ExecStart=@bindir@/fwupdmgr refresh --no-metadata-check

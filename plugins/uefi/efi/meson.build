@@ -30,16 +30,33 @@ if not have_gnu_efi
   error('gnu-efi support requested, but headers were not found')
 endif
 
-arch_lds = 'elf_@0@_efi.lds'.format(gnu_efi_path_arch)
+arch_lds = 'efi.lds'
+arch_crt = 'crt0.o'
 if efi_ldsdir == ''
-  efi_ldsdir = join_paths(efi_libdir, 'gnuefi')
+  efi_ldsdir = join_paths(efi_libdir, 'gnuefi', gnu_efi_path_arch)
   cmd = run_command('test', '-f', join_paths(efi_ldsdir, arch_lds))
+  if cmd.returncode() != 0
+    arch_lds = 'elf_@0@_efi.lds'.format(gnu_efi_path_arch)
+    arch_crt = 'crt0-efi-@0@.o'.format(gnu_efi_path_arch)
+    efi_ldsdir = join_paths(efi_libdir, 'gnuefi')
+    cmd = run_command('test', '-f', join_paths(efi_ldsdir, arch_lds))
+  endif
   if cmd.returncode() != 0
     efi_ldsdir = efi_libdir
     cmd = run_command('test', '-f', join_paths(efi_ldsdir, arch_lds))
     if cmd.returncode() != 0
       error('Cannot find @0@'.format(arch_lds))
     endif
+  endif
+else
+  cmd = run_command('test', '-f', join_paths(efi_ldsdir, arch_lds))
+  if cmd.returncode() != 0
+    arch_lds = 'elf_@0@_efi.lds'.format(gnu_efi_path_arch)
+    arch_crt = 'crt0-efi-@0@.o'.format(gnu_efi_path_arch)
+    cmd = run_command('test', '-f', join_paths(efi_ldsdir, arch_lds))
+  endif
+  if cmd.returncode() != 0
+    error('Cannot find @0@'.format(arch_lds))
   endif
 endif
 
@@ -93,8 +110,9 @@ efi_ldflags = ['-T',
                '-Bsymbolic',
                '-nostdlib',
                '-znocombreloc',
+               '-L', efi_ldsdir,
                '-L', efi_libdir,
-               join_paths(efi_ldsdir, 'crt0-efi-@0@.o'.format(gnu_efi_path_arch))]
+               join_paths(efi_ldsdir, arch_crt)]
 if efi_arch == 'aarch64' or efi_arch == 'arm'
   # Aarch64 and ARM32 don't have an EFI capable objcopy. Use 'binary'
   # instead, and add required symbols manually.
@@ -135,20 +153,11 @@ so = custom_target('fwup.so',
                              efi_ldflags + ['@INPUT@'] +
                              ['-lefi', '-lgnuefi', libgcc_file_name])
 
+build_tool = join_paths(meson.source_root(), 'plugins', 'uefi', 'efi', 'generate_binary.sh')
 app = custom_target(efi_name,
                     input : so,
                     output : efi_name,
-                    command : [objcopy,
-                               '-j', '.text',
-                               '-j', '.sdata',
-                               '-j', '.data',
-                               '-j', '.dynamic',
-                               '-j', '.dynsym',
-                               '-j', '.rel',
-                               '-j', '.rela',
-                               '-j', '.reloc']
-                               + efi_format +
-                               ['@INPUT@', '@OUTPUT@'],
+                    command : [build_tool, '@INPUT@', '@OUTPUT@', efi_format],
                     install : true,
                     install_dir : efi_app_location)
 

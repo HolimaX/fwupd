@@ -13,9 +13,14 @@
 #include <unistd.h>
 #include <fcntl.h>
 
+#ifdef HAVE_TSS2
+#include <tss2/tss2_esys.h>
+#endif
+
 #include "fwupd-common.h"
 #include "fu-plugin-dell.h"
 #include "fu-plugin-vfuncs.h"
+#include "fu-hash.h"
 #include "fu-device-metadata.h"
 
 /* These are used to indicate the status of a previous DELL flash */
@@ -117,9 +122,14 @@ static guint8 enclosure_whitelist [] = { 0x03, /* desktop */
 static guint16
 fu_dell_get_system_id (FuPlugin *plugin)
 {
+	FuPluginData *data = fu_plugin_get_data (plugin);
 	const gchar *system_id_str = NULL;
 	guint16 system_id = 0;
 	gchar *endptr = NULL;
+
+	/* don't care for test suite */
+	if (data->smi_obj->fake_smbios)
+		return 0;
 
 	system_id_str = fu_plugin_get_dmi_value (plugin,
 		FU_HWIDS_KEY_PRODUCT_SKU);
@@ -224,26 +234,6 @@ fu_plugin_dell_inject_fake_data (FuPlugin *plugin,
 	data->can_switch_modes = TRUE;
 }
 
-static FwupdVersionFormat
-fu_plugin_dell_get_version_format (FuPlugin *plugin)
-{
-	const gchar *content;
-	const gchar *quirk;
-	g_autofree gchar *group = NULL;
-
-	content = fu_plugin_get_dmi_value (plugin, FU_HWIDS_KEY_MANUFACTURER);
-	if (content == NULL)
-		return FWUPD_VERSION_FORMAT_TRIPLET;
-
-	/* any quirks match */
-	group = g_strdup_printf ("SmbiosManufacturer=%s", content);
-	quirk = fu_plugin_lookup_quirk_by_id (plugin, group,
-					      FU_QUIRKS_UEFI_VERSION_FORMAT);
-	if (quirk == NULL)
-		return FWUPD_VERSION_FORMAT_TRIPLET;
-	return fwupd_version_format_from_string (quirk);
-}
-
 static gboolean
 fu_plugin_dell_capsule_supported (FuPlugin *plugin)
 {
@@ -279,6 +269,7 @@ fu_plugin_dock_node (FuPlugin *plugin, const gchar *platform,
 		dock_name = g_strdup_printf ("Dell %s", dock_type);
 	}
 	fu_device_set_vendor (dev, "Dell Inc.");
+	fu_device_set_vendor_id (dev, "PCI:0x1028");
 	fu_device_set_name (dev, dock_name);
 	fu_device_set_metadata (dev, FU_DEVICE_METADATA_UEFI_DEVICE_KIND, "device-firmware");
 	if (type == DOCK_TYPE_TB16) {
@@ -289,8 +280,9 @@ fu_plugin_dock_node (FuPlugin *plugin, const gchar *platform,
 	fu_device_add_icon (dev, "computer");
 	fu_device_add_guid (dev, component_guid);
 	fu_device_add_flag (dev, FWUPD_DEVICE_FLAG_REQUIRE_AC);
+	fu_device_set_version_format (dev, version_format);
 	if (version != NULL) {
-		fu_device_set_version (dev, version, version_format);
+		fu_device_set_version (dev, version);
 		if (fu_plugin_dell_capsule_supported (plugin)) {
 			fu_device_add_flag (dev, FWUPD_DEVICE_FLAG_UPDATABLE);
 			fu_device_add_flag (dev, FWUPD_DEVICE_FLAG_NEEDS_REBOOT);
@@ -310,7 +302,7 @@ fu_plugin_usb_device_added (FuPlugin *plugin,
 			    GError **error)
 {
 	FuPluginData *data = fu_plugin_get_data (plugin);
-	FwupdVersionFormat version_format;
+	FwupdVersionFormat version_format = FWUPD_VERSION_FORMAT_DELL_BIOS;
 	guint16 pid;
 	guint16 vid;
 	const gchar *query_str;
@@ -363,7 +355,6 @@ fu_plugin_usb_device_added (FuPlugin *plugin,
 	g_debug ("Dock cable type: %" G_GUINT32_FORMAT, dock_info->cable_type);
 	g_debug ("Dock location: %d", dock_info->location);
 	g_debug ("Dock component count: %d", dock_info->component_count);
-	version_format = fu_plugin_dell_get_version_format (plugin);
 
 	for (guint i = 0; i < dock_info->component_count; i++) {
 		g_autofree gchar *fw_str = NULL;
@@ -522,6 +513,120 @@ fu_plugin_get_results (FuPlugin *plugin, FuDevice *device, GError **error)
 	return TRUE;
 }
 
+#ifdef HAVE_TSS2
+static void Esys_Finalize_autoptr_cleanup (ESYS_CONTEXT *esys_context)
+{
+	Esys_Finalize (&esys_context);
+}
+G_DEFINE_AUTOPTR_CLEANUP_FUNC (ESYS_CONTEXT, Esys_Finalize_autoptr_cleanup)
+
+static gchar *
+fu_plugin_dell_get_tpm_capability (ESYS_CONTEXT *ctx, guint32 query)
+{
+	TSS2_RC rc;
+	guint32 val;
+	gchar result[5] = {'\0'};
+	g_autofree TPMS_CAPABILITY_DATA *capability = NULL;
+	rc = Esys_GetCapability (ctx, ESYS_TR_NONE, ESYS_TR_NONE, ESYS_TR_NONE,
+	                         TPM2_CAP_TPM_PROPERTIES, query, 1, NULL, &capability);
+	if (rc != TSS2_RC_SUCCESS) {
+		g_debug ("capability request failed for query %x", query);
+		return NULL;
+	}
+	if (capability->data.tpmProperties.count == 0) {
+		g_debug ("no properties returned for query %x", query);
+		return NULL;
+	}
+	if (capability->data.tpmProperties.tpmProperty[0].property != query) {
+		g_debug ("wrong query returned (got %x expected %x)",
+			 capability->data.tpmProperties.tpmProperty[0].property,
+			 query);
+		return NULL;
+	}
+
+	val = GUINT32_FROM_BE (capability->data.tpmProperties.tpmProperty[0].value);
+	memcpy (result, (gchar *) &val, 4);
+
+	/* convert non-ASCII into spaces */
+	for (guint i = 0; i < 4; i++) {
+		if (!g_ascii_isgraph (result[i]) && result[i] != '\0')
+			result[i] = 0x20;
+	}
+
+	return fu_common_strstrip (result);
+}
+#endif
+
+static gboolean
+fu_plugin_dell_add_tpm_model (FuDevice *dev, GError **error)
+{
+#ifdef HAVE_TSS2
+	TSS2_RC rc;
+	const gchar *base = "DELL-TPM";
+	g_autoptr(ESYS_CONTEXT) ctx = NULL;
+	g_autofree gchar *family = NULL;
+	g_autofree gchar *manufacturer = NULL;
+	g_autofree gchar *vendor1 = NULL;
+	g_autofree gchar *vendor2 = NULL;
+	g_autofree gchar *vendor3 = NULL;
+	g_autofree gchar *vendor4 = NULL;
+	g_autofree gchar *v1 = NULL;
+	g_autofree gchar *v1_v2 = NULL;
+	g_autofree gchar *v1_v2_v3 = NULL;
+	g_autofree gchar *v1_v2_v3_v4 = NULL;
+
+	rc = Esys_Initialize (&ctx, NULL, NULL);
+	if (rc != TSS2_RC_SUCCESS) {
+		g_set_error_literal (error, FWUPD_ERROR, FWUPD_ERROR_NOT_FOUND,
+		                     "failed to initialize TPM library");
+		return FALSE;
+	}
+	rc = Esys_Startup (ctx, TPM2_SU_CLEAR);
+	if (rc != TSS2_RC_SUCCESS) {
+		g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
+		                     "failed to initialize TPM");
+		return FALSE;
+	}
+
+	/* lookup guaranteed details from TPM */
+	family = fu_plugin_dell_get_tpm_capability (ctx,
+						    TPM2_PT_FAMILY_INDICATOR);
+	if (family == NULL) {
+		g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
+		                     "failed to read TPM family");
+		return FALSE;
+	}
+	manufacturer = fu_plugin_dell_get_tpm_capability (ctx, TPM2_PT_MANUFACTURER);
+	if (manufacturer == NULL) {
+		g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
+		                     "failed to read TPM manufacturer");
+		return FALSE;
+	}
+	vendor1 = fu_plugin_dell_get_tpm_capability (ctx, TPM2_PT_VENDOR_STRING_1);
+	if (vendor1 == NULL) {
+		g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
+		                     "failed to read TPM vendor string");
+		return FALSE;
+	}
+
+	/* these are not guaranteed by spec and may be NULL */
+	vendor2 = fu_plugin_dell_get_tpm_capability (ctx, TPM2_PT_VENDOR_STRING_2);
+	vendor3 = fu_plugin_dell_get_tpm_capability (ctx, TPM2_PT_VENDOR_STRING_3);
+	vendor4 = fu_plugin_dell_get_tpm_capability (ctx, TPM2_PT_VENDOR_STRING_4);
+
+	/* add GUIDs to daemon */
+	v1 = g_strjoin ("-", base, family, manufacturer, vendor1, NULL);
+	v1_v2 = g_strconcat (v1, vendor2, NULL);
+	v1_v2_v3 = g_strconcat (v1_v2, vendor3, NULL);
+	v1_v2_v3_v4 = g_strconcat (v1_v2_v3, vendor4, NULL);
+	fu_device_add_instance_id (dev, v1);
+	fu_device_add_instance_id (dev, v1_v2);
+	fu_device_add_instance_id (dev, v1_v2_v3);
+	fu_device_add_instance_id (dev, v1_v2_v3_v4);
+#endif
+	return TRUE;
+}
+
 gboolean
 fu_plugin_dell_detect_tpm (FuPlugin *plugin, GError **error)
 {
@@ -537,12 +642,11 @@ fu_plugin_dell_detect_tpm (FuPlugin *plugin, GError **error)
 	g_autofree gchar *tpm_guid = NULL;
 	g_autofree gchar *tpm_guid_raw = NULL;
 	g_autofree gchar *tpm_id_alt = NULL;
-	g_autofree gchar *tpm_id = NULL;
 	g_autofree gchar *version_str = NULL;
 	struct tpm_status *out = NULL;
 	g_autoptr (FuDevice) dev_alt = NULL;
 	g_autoptr (FuDevice) dev = NULL;
-	const gchar *product_name = "Unknown";
+	g_autoptr(GError) error_tss = NULL;
 
 	fu_dell_clear_smi (data->smi_obj);
 	out = (struct tpm_status *) data->smi_obj->output;
@@ -597,7 +701,6 @@ fu_plugin_dell_detect_tpm (FuPlugin *plugin, GError **error)
 
 	tpm_guid_raw = g_strdup_printf ("%04x-%s", system_id, tpm_mode);
 	tpm_guid = fwupd_guid_hash_string (tpm_guid_raw);
-	tpm_id = g_strdup_printf ("DELL-%s" G_GUINT64_FORMAT, tpm_guid);
 
 	tpm_guid_raw_alt = g_strdup_printf ("%04x-%s", system_id, tpm_mode_alt);
 	tpm_guid_alt = fwupd_guid_hash_string (tpm_guid_raw_alt);
@@ -609,20 +712,20 @@ fu_plugin_dell_detect_tpm (FuPlugin *plugin, GError **error)
 						     FWUPD_VERSION_FORMAT_QUAD);
 
 	/* make it clear that the TPM is a discrete device of the product */
-	if (!data->smi_obj->fake_smbios) {
-		product_name = fu_plugin_get_dmi_value (plugin, FU_HWIDS_KEY_PRODUCT_NAME);
-	}
-	pretty_tpm_name = g_strdup_printf ("%s TPM %s", product_name, tpm_mode);
-	pretty_tpm_name_alt = g_strdup_printf ("%s TPM %s", product_name, tpm_mode_alt);
+	pretty_tpm_name = g_strdup_printf ("TPM %s", tpm_mode);
+	pretty_tpm_name_alt = g_strdup_printf ("TPM %s", tpm_mode_alt);
 
 	/* build Standard device nodes */
 	dev = fu_device_new ();
-	fu_device_set_id (dev, tpm_id);
-	fu_device_add_guid (dev, tpm_guid);
+	fu_device_set_physical_id (dev, "DEVNAME=/dev/tpm0");
+	fu_device_add_instance_id (dev, tpm_guid_raw);
+	fu_device_add_instance_id (dev, "system-tpm");
 	fu_device_set_vendor (dev, "Dell Inc.");
+	fu_device_set_vendor_id (dev, "PCI:0x1028");
 	fu_device_set_name (dev, pretty_tpm_name);
 	fu_device_set_summary (dev, "Platform TPM device");
-	fu_device_set_version (dev, version_str, FWUPD_VERSION_FORMAT_QUAD);
+	fu_device_set_version_format (dev, FWUPD_VERSION_FORMAT_QUAD);
+	fu_device_set_version (dev, version_str);
 	fu_device_add_flag (dev, FWUPD_DEVICE_FLAG_INTERNAL);
 	fu_device_add_flag (dev, FWUPD_DEVICE_FLAG_REQUIRE_AC);
 	fu_device_add_icon (dev, "computer");
@@ -637,17 +740,24 @@ fu_plugin_dell_detect_tpm (FuPlugin *plugin, GError **error)
 		}
 		fu_device_set_flashes_left (dev, out->flashes_left);
 	} else {
-		g_debug ("%s updating disabled due to TPM ownership",
-			pretty_tpm_name);
+		fu_device_set_update_error (dev,
+					    "Updating disabled due to TPM ownership");
 	}
+	/* build GUIDs from TSS strings */
+	if (!fu_plugin_dell_add_tpm_model (dev, &error_tss))
+		g_debug ("could not build instances: %s", error_tss->message);
+
+	if (!fu_device_setup (dev, error))
+		return FALSE;
 	fu_plugin_device_register (plugin, dev);
 
 	/* build alternate device node */
 	if (can_switch_modes) {
 		dev_alt = fu_device_new ();
 		fu_device_set_id (dev_alt, tpm_id_alt);
-		fu_device_add_guid (dev_alt, tpm_guid_alt);
+		fu_device_add_instance_id (dev_alt, tpm_guid_raw_alt);
 		fu_device_set_vendor (dev, "Dell Inc.");
+		fu_device_set_vendor_id (dev, "PCI:0x1028");
 		fu_device_set_name (dev_alt, pretty_tpm_name_alt);
 		fu_device_set_summary (dev_alt, "Alternate mode for platform TPM device");
 		fu_device_add_flag (dev_alt, FWUPD_DEVICE_FLAG_INTERNAL);
@@ -666,9 +776,10 @@ fu_plugin_dell_detect_tpm (FuPlugin *plugin, GError **error)
 		if ((out->status & TPM_OWN_MASK) == 0 && out->flashes_left > 0) {
 			fu_device_set_flashes_left (dev_alt, out->flashes_left);
 		} else {
-			g_debug ("%s mode switch disabled due to TPM ownership",
-				 pretty_tpm_name);
+			fu_device_set_update_error (dev_alt, "mode switch disabled due to TPM ownership");
 		}
+		if (!fu_device_setup (dev_alt, error))
+			return FALSE;
 		fu_plugin_device_register (plugin, dev_alt);
 	}
 	else
@@ -720,15 +831,19 @@ fu_plugin_init (FuPlugin *plugin)
 	data->smi_obj = g_malloc0 (sizeof (FuDellSmiObj));
 	if (g_getenv ("FWUPD_DELL_VERBOSE") != NULL)
 		g_setenv ("LIBSMBIOS_C_DEBUG_OUTPUT_ALL", "1", TRUE);
+	else
+		g_setenv ("TSS2_LOG", "esys+error,tcti+none", FALSE);
 	if (fu_dell_supported (plugin))
 		data->smi_obj->smi = dell_smi_factory (DELL_SMI_DEFAULTS);
 	data->smi_obj->fake_smbios = FALSE;
 	if (g_getenv ("FWUPD_DELL_FAKE_SMBIOS") != NULL)
 		data->smi_obj->fake_smbios = TRUE;
-	fu_plugin_add_rule (plugin, FU_PLUGIN_RULE_REQUIRES_QUIRK, FU_QUIRKS_PLUGIN);
 
 	/* make sure that UEFI plugin is ready to receive devices */
 	fu_plugin_add_rule (plugin, FU_PLUGIN_RULE_RUN_AFTER, "uefi");
+
+	/* our TPM device is upgradable! */
+	fu_plugin_add_rule (plugin, FU_PLUGIN_RULE_BETTER_THAN, "tpm");
 }
 
 void

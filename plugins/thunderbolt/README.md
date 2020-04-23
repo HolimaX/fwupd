@@ -31,6 +31,17 @@ When the device is in "safe mode" the GUID is hardcoded using:
 
  * `TBT-$(vid)$(pid)-native` when native, and `TBT-$(vid)$(pid)` otherwise.
 
+Additionally for host system thunderbolt controllers another GUID is added
+containing the domain designation of the controller.  This is intended to be
+used for systems with multiple host controllers to disambiguiate between controllers.
+
+* `TBT-$(vid)$(pid)-native-controller$(num)`
+
+Vendor ID Security
+------------------
+
+The vendor ID is set from the udev vendor, for example set to `TBT:0x$(vid)`
+
 Runtime Power Management
 ------------------------
 

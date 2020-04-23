@@ -10,7 +10,6 @@
 #include <poll.h>
 #include <string.h>
 #include <termios.h>
-#include <errno.h>
 
 #include "fu-io-channel.h"
 #include "fu-altos-device.h"
@@ -18,11 +17,7 @@
 
 struct _FuAltosDevice {
 	FuUsbDevice		 parent_instance;
-	FuAltosDeviceKind	 kind;
-	guint32			 serial[9];
-	gchar			*guid;
 	gchar			*tty;
-	gchar			*version;
 	guint64			 addr_base;
 	guint64			 addr_bound;
 	struct termios		 tty_termios;
@@ -31,51 +26,15 @@ struct _FuAltosDevice {
 
 G_DEFINE_TYPE (FuAltosDevice, fu_altos_device, FU_TYPE_USB_DEVICE)
 
-#ifndef HAVE_GUDEV_232
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wunused-function"
-G_DEFINE_AUTOPTR_CLEANUP_FUNC(GUdevClient, g_object_unref)
-#pragma clang diagnostic pop
-#endif
-
-/**
- * fu_altos_device_kind_from_string:
- * @kind: the string.
- *
- * Converts the text representation to an enumerated value.
- *
- * Returns: (transfer full): a #FuAltosDeviceKind, or %FU_ALTOS_DEVICE_KIND_UNKNOWN for unknown.
- *
- * Since: 0.1.0
- **/
-FuAltosDeviceKind
-fu_altos_device_kind_from_string (const gchar *kind)
+static void
+fu_altos_device_to_string (FuDevice *device, guint idt, GString *str)
 {
-	if (g_strcmp0 (kind, "BOOTLOADER") == 0)
-		return FU_ALTOS_DEVICE_KIND_BOOTLOADER;
-	if (g_strcmp0 (kind, "CHAOSKEY") == 0)
-		return FU_ALTOS_DEVICE_KIND_CHAOSKEY;
-	return FU_ALTOS_DEVICE_KIND_UNKNOWN;
-}
-
-/**
- * fu_altos_device_kind_to_string:
- * @kind: the #FuAltosDeviceKind.
- *
- * Converts the enumerated value to an text representation.
- *
- * Returns: string version of @kind
- *
- * Since: 0.1.0
- **/
-const gchar *
-fu_altos_device_kind_to_string (FuAltosDeviceKind kind)
-{
-	if (kind == FU_ALTOS_DEVICE_KIND_BOOTLOADER)
-		return "BOOTLOADER";
-	if (kind == FU_ALTOS_DEVICE_KIND_CHAOSKEY)
-		return "CHAOSKEY";
-	return NULL;
+	FuAltosDevice *self = FU_ALTOS_DEVICE (device);
+	fu_common_string_append_kv (str, idt, "TTY", self->tty);
+	if (self->addr_base != 0x0)
+		fu_common_string_append_kx (str, idt, "AddrBase", self->addr_base);
+	if (self->addr_bound != 0x0)
+		fu_common_string_append_kx (str, idt, "AddrBound", self->addr_bound);
 }
 
 static void
@@ -83,17 +42,9 @@ fu_altos_device_finalize (GObject *object)
 {
 	FuAltosDevice *self = FU_ALTOS_DEVICE (object);
 
-	g_free (self->guid);
 	g_free (self->tty);
-	g_free (self->version);
 
 	G_OBJECT_CLASS (fu_altos_device_parent_class)->finalize (object);
-}
-
-FuAltosDeviceKind
-fu_altos_device_get_kind (FuAltosDevice *self)
-{
-	return self->kind;
 }
 
 static gboolean
@@ -153,6 +104,8 @@ fu_altos_device_tty_write (FuAltosDevice *self,
 	/* lets assume this is text */
 	if (data_len < 0)
 		data_len = strlen (data);
+	if (g_getenv ("FWUPD_ALTOS_VERBOSE") != NULL)
+		fu_common_dump_raw (G_LOG_DOMAIN, "write", (const guint8 *) data, (gsize) data_len);
 	return fu_io_channel_write_raw (self->io_channel,
 					(const guint8 *) data,
 					(gsize) data_len,
@@ -172,6 +125,8 @@ fu_altos_device_tty_read (FuAltosDevice *self,
 					timeout_ms, FU_IO_CHANNEL_FLAG_NONE, error);
 	if (buf == NULL)
 		return NULL;
+	if (g_getenv ("FWUPD_ALTOS_VERBOSE") != NULL)
+		fu_common_dump_bytes (G_LOG_DOMAIN, "read", buf);
 	return g_string_new_len (g_bytes_get_data (buf, NULL), g_bytes_get_size (buf));
 }
 
@@ -276,7 +231,7 @@ fu_altos_device_prepare_firmware (FuDevice *device,
 {
 	g_autoptr(FuFirmware) firmware = fu_altos_firmware_new ();
 	if (!fu_firmware_parse (firmware, fw, flags, error))
-		return FALSE;
+		return NULL;
 	return g_steal_pointer (&firmware);
 }
 
@@ -296,7 +251,7 @@ fu_altos_device_write_firmware (FuDevice *device,
 	g_autoptr(GString) buf = g_string_new (NULL);
 
 	/* check kind */
-	if (self->kind != FU_ALTOS_DEVICE_KIND_BOOTLOADER) {
+	if (!fu_device_has_flag (device, FWUPD_DEVICE_FLAG_IS_BOOTLOADER)) {
 		g_set_error_literal (error,
 				     FWUPD_ERROR,
 				     FWUPD_ERROR_NOT_SUPPORTED,
@@ -341,7 +296,7 @@ fu_altos_device_write_firmware (FuDevice *device,
 	}
 
 	/* check firmware will fit */
-	fw = fu_firmware_image_get_bytes (img, error);
+	fw = fu_firmware_image_write (img, error);
 	if (fw == NULL)
 		return FALSE;
 	data = g_bytes_get_data (fw, (gsize *) &data_len);
@@ -361,6 +316,7 @@ fu_altos_device_write_firmware (FuDevice *device,
 					    error);
 	if (locker == NULL)
 		return FALSE;
+	fu_device_set_status (device, FWUPD_STATUS_DEVICE_WRITE);
 	for (guint i = 0; i < flash_len; i+= 0x100) {
 		g_autoptr(GString) str = NULL;
 		guint8 buf_tmp[0x100];
@@ -425,16 +381,17 @@ fu_altos_device_write_firmware (FuDevice *device,
 	return TRUE;
 }
 
-static GBytes *
+static FuFirmware *
 fu_altos_device_read_firmware (FuDevice *device, GError **error)
 {
 	FuAltosDevice *self = FU_ALTOS_DEVICE (device);
 	guint flash_len;
 	g_autoptr(FuDeviceLocker) locker  = NULL;
+	g_autoptr(GBytes) fw = NULL;
 	g_autoptr(GString) buf = g_string_new (NULL);
 
 	/* check kind */
-	if (self->kind != FU_ALTOS_DEVICE_KIND_BOOTLOADER) {
+	if (!fu_device_has_flag (device, FWUPD_DEVICE_FLAG_IS_BOOTLOADER)) {
 		g_set_error_literal (error,
 				     FWUPD_ERROR,
 				     FWUPD_ERROR_NOT_SUPPORTED,
@@ -484,7 +441,8 @@ fu_altos_device_read_firmware (FuDevice *device, GError **error)
 	}
 
 	/* success */
-	return g_bytes_new (buf->str, buf->len);
+	fw = g_bytes_new (buf->str, buf->len);
+	return fu_firmware_new_from_bytes (fw);
 }
 
 static gboolean
@@ -508,8 +466,10 @@ fu_altos_device_probe_bootloader (FuAltosDevice *self, GError **error)
 	if (!fu_altos_device_tty_write (self, "v\n", -1, error))
 		return FALSE;
 	str = fu_altos_device_tty_read (self, 100, -1, error);
-	if (str == NULL)
+	if (str == NULL) {
+		g_prefix_error (error, "failed to get version information: ");
 		return FALSE;
+	}
 
 	/* parse each line */
 	lines = g_strsplit_set (str->str, "\n\r", -1);
@@ -532,8 +492,7 @@ fu_altos_device_probe_bootloader (FuAltosDevice *self, GError **error)
 
 		/* version number */
 		if (g_str_has_prefix (lines[i], "software-version ")) {
-			fu_device_set_version (FU_DEVICE (self), lines[i] + 17,
-					       FWUPD_VERSION_FORMAT_TRIPLET);
+			fu_device_set_version (FU_DEVICE (self), lines[i] + 17);
 			continue;
 		}
 
@@ -560,83 +519,53 @@ fu_altos_device_probe (FuDevice *device, GError **error)
 {
 	FuAltosDevice *self = FU_ALTOS_DEVICE (device);
 	GUsbDevice *usb_device = fu_usb_device_get_dev (FU_USB_DEVICE (self));
+	const gchar *version_prefix = "ChaosKey-hw-1.0-sw-";
+	guint8 version_idx;
+	g_autofree gchar *version = NULL;
+	g_autoptr(FuDeviceLocker) locker = NULL;
 
 	/* bootloader uses tty */
-	if (self->kind == FU_ALTOS_DEVICE_KIND_BOOTLOADER)
+	if (fu_device_has_flag (device, FWUPD_DEVICE_FLAG_IS_BOOTLOADER))
 		return fu_altos_device_probe_bootloader (self, error);
 
-	/* get version */
-	if (self->kind == FU_ALTOS_DEVICE_KIND_CHAOSKEY) {
-		const gchar *version_prefix = "ChaosKey-hw-1.0-sw-";
-		guint8 version_idx;
-		g_autofree gchar *version = NULL;
-		g_autoptr(FuDeviceLocker) locker = NULL;
+	/* open */
+	locker = fu_device_locker_new (usb_device, error);
+	if (locker == NULL)
+		return FALSE;
 
-		/* open */
-		locker = fu_device_locker_new (usb_device, error);
-		if (locker == NULL)
-			return FALSE;
-
-		/* get string */
-		version_idx = g_usb_device_get_product_index (usb_device);
-		version = g_usb_device_get_string_descriptor (usb_device,
-							      version_idx,
-							      error);
-		if (version == NULL)
-			return FALSE;
-		if (!g_str_has_prefix (version, version_prefix)) {
-			g_set_error (error,
-				     FWUPD_ERROR,
-				     FWUPD_ERROR_NOT_SUPPORTED,
-				     "not a ChaosKey v1.0 device: %s",
-				     version);
-			return FALSE;
-		}
-		fu_device_set_version (FU_DEVICE (self), version + 19,
-				       FWUPD_VERSION_FORMAT_TRIPLET);
+	/* get string */
+	version_idx = g_usb_device_get_product_index (usb_device);
+	version = g_usb_device_get_string_descriptor (usb_device,
+						      version_idx,
+						      error);
+	if (version == NULL)
+		return FALSE;
+	if (!g_str_has_prefix (version, version_prefix)) {
+		g_set_error (error,
+			     FWUPD_ERROR,
+			     FWUPD_ERROR_NOT_SUPPORTED,
+			     "not a ChaosKey v1.0 device: %s",
+			     version);
+		return FALSE;
 	}
+	fu_device_set_version (FU_DEVICE (self), version + 19);
 
 	/* success */
 	return TRUE;
 }
 
-/* now with kind and usb_device set */
-static void
-fu_altos_device_init_real (FuAltosDevice *self)
-{
-	/* allowed, but requires manual bootloader step */
-	fu_device_add_flag (FU_DEVICE (self), FWUPD_DEVICE_FLAG_UPDATABLE);
-
-	/* set default vendor */
-	fu_device_set_vendor (FU_DEVICE (self), "altusmetrum.org");
-
-	/* set name */
-	switch (self->kind) {
-	case FU_ALTOS_DEVICE_KIND_BOOTLOADER:
-		fu_device_set_name (FU_DEVICE (self), "Altos [bootloader]");
-		break;
-	case FU_ALTOS_DEVICE_KIND_CHAOSKEY:
-		fu_device_set_name (FU_DEVICE (self), "Altos ChaosKey");
-		break;
-	default:
-		g_assert_not_reached ();
-		break;
-	}
-
-	/* set one line summary */
-	fu_device_set_summary (FU_DEVICE (self),
-			       "A USB hardware random number generator");
-
-	/* only the bootloader can do the update */
-	if (self->kind != FU_ALTOS_DEVICE_KIND_BOOTLOADER) {
-		fu_device_add_flag (FU_DEVICE (self),
-				    FWUPD_DEVICE_FLAG_NEEDS_BOOTLOADER);
-	}
-}
-
 static void
 fu_altos_device_init (FuAltosDevice *self)
 {
+	fu_device_add_flag (FU_DEVICE (self), FWUPD_DEVICE_FLAG_UPDATABLE);
+	fu_device_set_version_format (FU_DEVICE (self), FWUPD_VERSION_FORMAT_TRIPLET);
+	fu_device_set_vendor (FU_DEVICE (self), "altusmetrum.org");
+	fu_device_set_summary (FU_DEVICE (self), "A USB hardware random number generator");
+	fu_device_set_protocol (FU_DEVICE (self), "org.altusmetrum.altos");
+
+	/* requires manual step */
+	if (!fu_device_has_flag (FU_DEVICE (self), FWUPD_DEVICE_FLAG_IS_BOOTLOADER))
+		fu_device_add_flag (FU_DEVICE (self), FWUPD_DEVICE_FLAG_NEEDS_BOOTLOADER);
 }
 
 static void
@@ -644,38 +573,10 @@ fu_altos_device_class_init (FuAltosDeviceClass *klass)
 {
 	GObjectClass *object_class = G_OBJECT_CLASS (klass);
 	FuDeviceClass *klass_device = FU_DEVICE_CLASS (klass);
+	klass_device->to_string = fu_altos_device_to_string;
 	klass_device->probe = fu_altos_device_probe;
 	klass_device->prepare_firmware = fu_altos_device_prepare_firmware;
 	klass_device->write_firmware = fu_altos_device_write_firmware;
 	klass_device->read_firmware = fu_altos_device_read_firmware;
 	object_class->finalize = fu_altos_device_finalize;
-}
-
-typedef struct {
-	guint16			 vid;
-	guint16			 pid;
-	FuAltosDeviceKind	 kind;
-} FuAltosDeviceVidPid;
-
-FuAltosDevice *
-fu_altos_device_new (FuUsbDevice *device)
-{
-	const FuAltosDeviceVidPid vidpids[] = {
-		{ 0xfffe, 0x000a, FU_ALTOS_DEVICE_KIND_BOOTLOADER },
-		{ 0x1d50, 0x60c6, FU_ALTOS_DEVICE_KIND_CHAOSKEY },
-		{ 0x0000, 0x0000, FU_ALTOS_DEVICE_KIND_UNKNOWN }
-	};
-
-	/* set kind */
-	for (guint j = 0; vidpids[j].vid != 0x0000; j++) {
-		if (fu_usb_device_get_vid (device) == vidpids[j].vid &&
-		    fu_usb_device_get_pid (device) == vidpids[j].pid) {
-			FuAltosDevice *self = g_object_new (FU_TYPE_ALTOS_DEVICE, NULL);
-			fu_device_incorporate (FU_DEVICE (self), FU_DEVICE (device));
-			self->kind = vidpids[j].kind;
-			fu_altos_device_init_real (self);
-			return self;
-		}
-	}
-	return NULL;
 }

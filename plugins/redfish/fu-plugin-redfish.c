@@ -7,6 +7,7 @@
 #include "config.h"
 
 #include "fu-plugin-vfuncs.h"
+#include "fu-hash.h"
 
 #include "fu-redfish-client.h"
 #include "fu-redfish-common.h"
@@ -48,8 +49,8 @@ gboolean
 fu_plugin_startup (FuPlugin *plugin, GError **error)
 {
 	FuPluginData *data = fu_plugin_get_data (plugin);
+	gboolean ca_check;
 	g_autofree gchar *redfish_uri = NULL;
-	g_autofree gchar *ca_check = NULL;
 	g_autoptr(GBytes) smbios_data = NULL;
 
 	/* optional */
@@ -106,12 +107,8 @@ fu_plugin_startup (FuPlugin *plugin, GError **error)
 		}
 	}
 
-	ca_check = fu_plugin_get_config_value (plugin, "CACheck");
-	if (ca_check != NULL && g_ascii_strcasecmp (ca_check, "false") == 0)
-		fu_redfish_client_set_cacheck (data->client, FALSE);
-	else
-		fu_redfish_client_set_cacheck (data->client, TRUE);
-
+	ca_check = fu_plugin_get_config_value_boolean (plugin, "CACheck");
+	fu_redfish_client_set_cacheck (data->client, ca_check);
 	return fu_redfish_client_setup (data->client, smbios_data, error);
 }
 
@@ -120,7 +117,6 @@ fu_plugin_init (FuPlugin *plugin)
 {
 	FuPluginData *data = fu_plugin_alloc_data (plugin, sizeof (FuPluginData));
 	data->client = fu_redfish_client_new ();
-	fu_plugin_add_rule (plugin, FU_PLUGIN_RULE_SUPPORTS_PROTOCOL, "org.dmtf.redfish");
 	fu_plugin_set_build_hash (plugin, FU_BUILD_HASH);
 }
 

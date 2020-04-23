@@ -374,7 +374,75 @@ LIBFWUPD_1.2.10 {
 
 LIBFWUPD_1.3.1 {
   global:
+    fwupd_client_get_host_product;
     fwupd_remote_get_remotes_dir;
     fwupd_remote_set_remotes_dir;
   local: *;
 } LIBFWUPD_1.2.10;
+
+LIBFWUPD_1.3.2 {
+  global:
+    fwupd_client_get_host_machine_id;
+    fwupd_release_add_issue;
+    fwupd_release_get_issues;
+    fwupd_release_get_name_variant_suffix;
+    fwupd_release_set_name_variant_suffix;
+  local: *;
+} LIBFWUPD_1.3.1;
+
+LIBFWUPD_1.3.3 {
+  global:
+    fwupd_release_get_detach_caption;
+    fwupd_release_get_detach_image;
+    fwupd_release_set_detach_caption;
+    fwupd_release_set_detach_image;
+    fwupd_remote_get_automatic_reports;
+  local: *;
+} LIBFWUPD_1.3.2;
+
+LIBFWUPD_1.3.4 {
+  global:
+    fwupd_client_get_daemon_interactive;
+  local: *;
+} LIBFWUPD_1.3.3;
+
+LIBFWUPD_1.3.6 {
+  global:
+    fwupd_device_get_protocol;
+    fwupd_device_get_version_raw;
+    fwupd_device_set_protocol;
+    fwupd_device_set_version_raw;
+  local: *;
+} LIBFWUPD_1.3.4;
+
+LIBFWUPD_1.3.7 {
+  global:
+    fwupd_device_array_ensure_parents;
+    fwupd_device_get_children;
+  local: *;
+} LIBFWUPD_1.3.6;
+
+LIBFWUPD_1.4.0 {
+  global:
+    fwupd_device_get_status;
+    fwupd_device_get_version_bootloader_raw;
+    fwupd_device_get_version_lowest_raw;
+    fwupd_device_set_status;
+    fwupd_device_set_version_bootloader_raw;
+    fwupd_device_set_version_lowest_raw;
+    fwupd_release_get_created;
+    fwupd_release_get_urgency;
+    fwupd_release_set_created;
+    fwupd_release_set_urgency;
+    fwupd_release_urgency_from_string;
+    fwupd_release_urgency_to_string;
+    fwupd_remote_load_signature;
+  local: *;
+} LIBFWUPD_1.3.7;
+
+LIBFWUPD_1.4.1 {
+  global:
+    fwupd_client_get_devices_by_guid;
+    fwupd_device_id_is_valid;
+  local: *;
+} LIBFWUPD_1.4.0;

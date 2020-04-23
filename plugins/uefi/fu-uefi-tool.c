@@ -17,7 +17,7 @@
 #include "fu-uefi-common.h"
 #include "fu-uefi-device.h"
 #include "fu-uefi-update-info.h"
-#include "fu-uefi-vars.h"
+#include "fu-efivar.h"
 
 /* custom return code */
 #define EXIT_NOTHING_TO_DO		2
@@ -108,14 +108,16 @@ main (int argc, char *argv[])
 
 	setlocale (LC_ALL, "");
 
-	bindtextdomain (GETTEXT_PACKAGE, LOCALEDIR);
+	bindtextdomain (GETTEXT_PACKAGE, FWUPD_LOCALEDIR);
 	bind_textdomain_codeset (GETTEXT_PACKAGE, "UTF-8");
 	textdomain (GETTEXT_PACKAGE);
 
 	/* ensure root user */
+#ifdef HAVE_GETUID
 	if (getuid () != 0 || geteuid () != 0)
 		/* TRANSLATORS: we're poking around as a power user */
 		g_printerr ("%s\n", _("This program may only work correctly as root"));
+#endif
 
 	/* get a action_list of the commands */
 	priv->context = g_option_context_new (NULL);
@@ -163,23 +165,7 @@ main (int argc, char *argv[])
 				 error->message);
 			return EXIT_FAILURE;
 		}
-	} else {
-		esp_path = fu_uefi_guess_esp_path ();
-		if (esp_path == NULL) {
-			g_printerr ("Unable to determine EFI system partition "
-				    "location, override using --esp-path\n");
-			return EXIT_FAILURE;
-		}
 	}
-
-	/* check free space */
-	if (!fu_uefi_check_esp_free_space (esp_path,
-					   FU_UEFI_COMMON_REQUIRED_ESP_FREE_SPACE,
-					   &error)) {
-		g_printerr ("Unable to use EFI system partition: %s\n", error->message);
-		return EXIT_FAILURE;
-	}
-	g_debug ("ESP mountpoint set as %s", esp_path);
 
 	/* show the debug action_log from the last attempted update */
 	if (action_log) {
@@ -188,7 +174,7 @@ main (int argc, char *argv[])
 		g_autofree guint16 *buf_ucs2 = NULL;
 		g_autofree gchar *str = NULL;
 		g_autoptr(GError) error_local = NULL;
-		if (!fu_uefi_vars_get_data (FU_UEFI_VARS_GUID_FWUPDATE,
+		if (!fu_efivar_get_data (FU_EFIVAR_GUID_FWUPDATE,
 					    "FWUPDATE_DEBUG_LOG",
 					    &buf, &sz, NULL,
 					    &error_local)) {
@@ -227,7 +213,8 @@ main (int argc, char *argv[])
 					   path, error_parse->message);
 				continue;
 			}
-			fu_device_set_metadata (FU_DEVICE (dev), "EspPath", esp_path);
+			if (esp_path != NULL)
+				fu_device_set_metadata (FU_DEVICE (dev), "EspPath", esp_path);
 			g_ptr_array_add (devices, g_object_ref (dev));
 		}
 	}
@@ -293,7 +280,7 @@ main (int argc, char *argv[])
 	if (action_set_debug) {
 		const guint8 data = 1;
 		g_autoptr(GError) error_local = NULL;
-		if (!fu_uefi_vars_set_data (FU_UEFI_VARS_GUID_FWUPDATE,
+		if (!fu_efivar_set_data (FU_EFIVAR_GUID_FWUPDATE,
 					    "FWUPDATE_VERBOSE",
 					    &data, sizeof(data),
 					    EFI_VARIABLE_NON_VOLATILE |
@@ -309,7 +296,7 @@ main (int argc, char *argv[])
 	/* unset the debugging flag during update */
 	if (action_unset_debug) {
 		g_autoptr(GError) error_local = NULL;
-		if (!fu_uefi_vars_delete (FU_UEFI_VARS_GUID_FWUPDATE,
+		if (!fu_efivar_delete (FU_EFIVAR_GUID_FWUPDATE,
 					  "FWUPDATE_VERBOSE",
 					  &error_local)) {
 			g_printerr ("failed: %s\n", error_local->message);
@@ -333,12 +320,23 @@ main (int argc, char *argv[])
 			g_printerr ("failed: %s\n", error_local->message);
 			return EXIT_FAILURE;
 		}
-		fu_device_set_metadata (FU_DEVICE (dev), "EspPath", esp_path);
 		if (flags != NULL)
 			fu_device_set_custom_flags (FU_DEVICE (dev), flags);
+		if (!fu_device_prepare (FU_DEVICE (dev),
+					FWUPD_INSTALL_FLAG_NONE,
+					&error_local)) {
+			g_printerr ("failed: %s\n", error_local->message);
+			return EXIT_FAILURE;
+		}
 		if (!fu_device_write_firmware (FU_DEVICE (dev), fw,
 					       FWUPD_INSTALL_FLAG_NONE,
 					       &error_local)) {
+			g_printerr ("failed: %s\n", error_local->message);
+			return EXIT_FAILURE;
+		}
+		if (!fu_device_cleanup (FU_DEVICE (dev),
+					FWUPD_INSTALL_FLAG_NONE,
+					&error_local)) {
 			g_printerr ("failed: %s\n", error_local->message);
 			return EXIT_FAILURE;
 		}

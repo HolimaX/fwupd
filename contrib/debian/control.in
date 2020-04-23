@@ -2,15 +2,30 @@ Source: fwupd
 Priority: optional
 Maintainer: Debian EFI <debian-efi@lists.debian.org>
 Uploaders: Steve McIntyre <93sam@debian.org>,
-           Daniel Jared Dominguez <jared.dominguez@dell.com>,
            Matthias Klumpp <mak@debian.org>,
            Mario Limonciello <mario.limonciello@dell.com>
 Build-Depends: %%%DYNAMIC%%%
-Standards-Version: 4.3.0
+Build-Depends-Indep: libglib2.0-doc <!nodoc>
+Standards-Version: 4.5.0
 Section: admin
 Homepage: https://github.com/fwupd/fwupd
 Vcs-Git: https://salsa.debian.org/efi-team/fwupd.git
 Vcs-Browser: https://salsa.debian.org/efi-team/fwupd
+
+Package: libfwupdplugin1
+Section: libs
+Architecture: linux-any
+Depends: ${misc:Depends},
+         ${shlibs:Depends}
+Multi-Arch: same
+Description: Firmware update daemon plugin library
+ fwupd is a daemon to allow session software to update device firmware.
+ You can either use a GUI software manager like GNOME Software to view and
+ apply updates, the command-line tool or the system D-Bus interface directly.
+ Firmware updates are supported for a variety of technologies.
+ See <https://github.com/fwupd/fwupd> for details
+ .
+ This package provides the library for the interface between daemon and plugins.
 
 Package: libfwupd2
 Section: libs
@@ -35,12 +50,18 @@ Depends: ${misc:Depends},
 Recommends: python3,
 	    bolt,
 	    fwupd-signed
+Provides: fwupdate
+Conflicts: fwupdate-amd64-signed,
+	   fwupdate-i386-signed,
+	   fwupdate-arm64-signed,
+	   fwupdate-armhf-signed
 Breaks: gir1.2-dfu-1.0 (<< 0.9.7-1),
 	libdfu1 (<< 0.9.7-1),
 	libdfu-dev (<< 0.9.7-1)
 Replaces: gir1.2-dfu-1.0 (<< 0.9.7-1),
 	  libdfu1 (<< 0.9.7-1),
-	  libdfu-dev (<< 0.9.7-1)
+	  libdfu-dev (<< 0.9.7-1),
+	  fwupdate (<< 12-7)
 Multi-Arch: foreign
 Description: Firmware update daemon
  fwupd is a daemon to allow session software to update device firmware.
@@ -115,6 +136,34 @@ Depends: ${misc:Depends},
 Section: introspection
 Description: GObject introspection data for libfwupd
  This package provides the introspection data for libfwupd.
+ .
+ It can be used by packages using the GIRepository format to generate
+ dynamic bindings.
+
+Package: libfwupdplugin-dev
+Architecture: linux-any
+Multi-Arch: same
+Depends: libfwupdplugin1 (= ${binary:Version}),
+         gir1.2-fwupdplugin-1.0 (= ${binary:Version}),
+         ${misc:Depends}
+Section: libdevel
+Description: development files for libfwupdplugin
+ fwupd is a daemon to allow session software to update device firmware.
+ You can either use a GUI software manager like GNOME Software to view and
+ apply updates, the command-line tool or the system D-Bus interface directly.
+ Firmware updates are supported for a variety of technologies.
+ See <https://github.com/fwupd/fwupd> for details
+ .
+ This package provides the development files for libfwupdplugin
+
+Package: gir1.2-fwupdplugin-1.0
+Architecture: linux-any
+Multi-Arch: same
+Depends: ${misc:Depends},
+         ${gir:Depends}
+Section: introspection
+Description: GObject introspection data for libfwupdplugin
+ This package provides the introspection data for libfwupdplugin.
  .
  It can be used by packages using the GIRepository format to generate
  dynamic bindings.

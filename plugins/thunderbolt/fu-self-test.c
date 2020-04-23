@@ -6,7 +6,6 @@
 
 #include "config.h"
 
-#include <errno.h>
 #include <fwupd.h>
 #include <glib.h>
 #include <glib/gprintf.h>
@@ -25,7 +24,6 @@
 
 #include "fu-plugin-private.h"
 #include "fu-thunderbolt-image.h"
-#include "fu-test.h"
 
 static gchar *
 udev_mock_add_domain (UMockdevTestbed *bed, int id)
@@ -344,9 +342,7 @@ write_controller_fw (const gchar *nvm)
 	g_autoptr(GError) error = NULL;
 	gssize n;
 
-	fw_path = fu_test_get_filename (TESTDATADIR, "thunderbolt/minimal-fw-controller.bin");
-	g_assert_nonnull (fw_path);
-
+	fw_path = g_build_filename (TESTDATADIR, "thunderbolt/minimal-fw-controller.bin", NULL);
 	fw_file = g_file_new_for_path (fw_path);
 	g_assert_nonnull (fw_file);
 
@@ -872,6 +868,7 @@ test_set_up (ThunderboltTest *tt, gconstpointer params)
 {
 	TestFlags flags = GPOINTER_TO_UINT(params);
 	gboolean ret;
+	g_autofree gchar *pluginfn = NULL;
 	g_autofree gchar *sysfs = NULL;
 	g_autoptr(GError) error = NULL;
 
@@ -884,7 +881,10 @@ test_set_up (ThunderboltTest *tt, gconstpointer params)
 	tt->plugin = fu_plugin_new ();
 	g_assert_nonnull (tt->plugin);
 
-	ret = fu_plugin_open (tt->plugin, PLUGINBUILDDIR "/libfu_plugin_thunderbolt.so", &error);
+	pluginfn = g_build_filename (PLUGINBUILDDIR,
+				     "libfu_plugin_thunderbolt." G_MODULE_SUFFIX,
+				     NULL);
+	ret = fu_plugin_open (tt->plugin, pluginfn, &error);
 
 	g_assert_no_error (error);
 	g_assert_true (ret);
@@ -917,8 +917,7 @@ test_set_up (ThunderboltTest *tt, gconstpointer params)
 	if (flags & TEST_PREPARE_FIRMWARE) {
 		g_autofree gchar *fw_path = NULL;
 
-		fw_path = fu_test_get_filename (TESTDATADIR, "thunderbolt/minimal-fw.bin");
-		g_assert_nonnull (fw_path);
+		fw_path = g_build_filename (TESTDATADIR, "thunderbolt/minimal-fw.bin", NULL);
 		tt->fw_file = g_mapped_file_new (fw_path, FALSE, &error);
 		g_assert_no_error (error);
 		g_assert_nonnull (tt->fw_file);
@@ -1011,10 +1010,8 @@ test_image_validation (ThunderboltTest *tt, gconstpointer user_data)
 	g_autoptr(GError)      error = NULL;
 
 	/* image as if read from the controller (i.e. no headers) */
-	ctl_path = fu_test_get_filename (TESTDATADIR,
-					 "thunderbolt/minimal-fw-controller.bin");
-	g_assert_nonnull (ctl_path);
-
+	ctl_path = g_build_filename (TESTDATADIR,
+					 "thunderbolt/minimal-fw-controller.bin", NULL);
 	ctl_file = g_mapped_file_new (ctl_path, FALSE, &error);
 	g_assert_no_error (error);
 	g_assert_nonnull (ctl_file);
@@ -1023,9 +1020,7 @@ test_image_validation (ThunderboltTest *tt, gconstpointer user_data)
 	g_assert_nonnull (ctl_data);
 
 	/* valid firmware update image */
-	fwi_path = fu_test_get_filename (TESTDATADIR, "thunderbolt/minimal-fw.bin");
-	g_assert_nonnull (fwi_path);
-
+	fwi_path = g_build_filename (TESTDATADIR, "thunderbolt/minimal-fw.bin", NULL);
 	fwi_file = g_mapped_file_new (fwi_path, FALSE, &error);
  	g_assert_no_error (error);
 	g_assert_nonnull (fwi_file);
@@ -1034,9 +1029,7 @@ test_image_validation (ThunderboltTest *tt, gconstpointer user_data)
 	g_assert_nonnull (fwi_data);
 
 	/* a wrong/bad firmware update image */
- 	bad_path = fu_test_get_filename (TESTDATADIR, "colorhug/firmware.bin");
-	g_assert_nonnull (bad_path);
-
+	bad_path = g_build_filename (TESTDATADIR, "colorhug/firmware.bin", NULL);
 	bad_file = g_mapped_file_new (bad_path, FALSE, &error);
 	g_assert_no_error (error);
 	g_assert_nonnull (bad_file);

@@ -41,6 +41,7 @@ void		 fwupd_device_set_parent_id		(FwupdDevice	*device,
 FwupdDevice	*fwupd_device_get_parent		(FwupdDevice	*device);
 void		 fwupd_device_set_parent		(FwupdDevice	*device,
 							 FwupdDevice	*parent);
+GPtrArray	*fwupd_device_get_children		(FwupdDevice	*device);
 const gchar	*fwupd_device_get_name			(FwupdDevice	*device);
 void		 fwupd_device_set_name			(FwupdDevice	*device,
 							 const gchar	*name);
@@ -59,9 +60,18 @@ void		 fwupd_device_set_version		(FwupdDevice	*device,
 const gchar	*fwupd_device_get_version_lowest	(FwupdDevice	*device);
 void		 fwupd_device_set_version_lowest	(FwupdDevice	*device,
 							 const gchar	*version_lowest);
+guint64		 fwupd_device_get_version_lowest_raw	(FwupdDevice	*device);
+void		 fwupd_device_set_version_lowest_raw	(FwupdDevice	*device,
+							 guint64	version_lowest_raw);
 const gchar	*fwupd_device_get_version_bootloader	(FwupdDevice	*device);
 void		 fwupd_device_set_version_bootloader	(FwupdDevice	*device,
 							 const gchar	*version_bootloader);
+guint64		 fwupd_device_get_version_bootloader_raw (FwupdDevice	*device);
+void		 fwupd_device_set_version_bootloader_raw (FwupdDevice	*device,
+							 guint64	version_bootloader_raw);
+guint64		 fwupd_device_get_version_raw		(FwupdDevice	*device);
+void		 fwupd_device_set_version_raw		(FwupdDevice	*device,
+							 guint64	version_raw);
 FwupdVersionFormat fwupd_device_get_version_format	(FwupdDevice	*device);
 void		 fwupd_device_set_version_format	(FwupdDevice	*device,
 							 FwupdVersionFormat version_format);
@@ -92,6 +102,9 @@ void		 fwupd_device_add_checksum		(FwupdDevice	*device,
 const gchar	*fwupd_device_get_plugin		(FwupdDevice	*device);
 void		 fwupd_device_set_plugin		(FwupdDevice	*device,
 							 const gchar	*plugin);
+const gchar	*fwupd_device_get_protocol		(FwupdDevice	*device);
+void		 fwupd_device_set_protocol		(FwupdDevice	*device,
+							 const gchar	*protocol);
 const gchar	*fwupd_device_get_vendor		(FwupdDevice	*device);
 void		 fwupd_device_set_vendor		(FwupdDevice	*device,
 							 const gchar	*vendor);
@@ -122,6 +135,9 @@ void		 fwupd_device_set_update_error		(FwupdDevice	*device,
 const gchar	*fwupd_device_get_update_message	(FwupdDevice	*device);
 void		 fwupd_device_set_update_message	(FwupdDevice	*device,
 							 const gchar	*update_message);
+FwupdStatus	 fwupd_device_get_status		(FwupdDevice	*self);
+void		 fwupd_device_set_status		(FwupdDevice	*self,
+							 FwupdStatus	 status);
 void		 fwupd_device_add_release		(FwupdDevice	*device,
 							 FwupdRelease	*release);
 GPtrArray	*fwupd_device_get_releases		(FwupdDevice	*device);
@@ -131,5 +147,6 @@ gint		 fwupd_device_compare			(FwupdDevice	*device1,
 
 FwupdDevice	*fwupd_device_from_variant		(GVariant	*value);
 GPtrArray	*fwupd_device_array_from_variant	(GVariant	*value);
+void		 fwupd_device_array_ensure_parents	(GPtrArray	*devices);
 
 G_END_DECLS

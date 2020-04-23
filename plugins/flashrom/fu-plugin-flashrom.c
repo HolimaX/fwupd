@@ -24,6 +24,7 @@
 #include <string.h>
 
 #include "fu-plugin-vfuncs.h"
+#include "fu-hash.h"
 #include "libflashrom.h"
 
 #define SELFCHECK_TRUE 1
@@ -40,7 +41,6 @@ fu_plugin_init (FuPlugin *plugin)
 {
 	fu_plugin_set_build_hash (plugin, FU_BUILD_HASH);
 	fu_plugin_alloc_data (plugin, sizeof (FuPluginData));
-	fu_plugin_add_rule (plugin, FU_PLUGIN_RULE_SUPPORTS_PROTOCOL, "org.flashrom");
 }
 
 void
@@ -85,8 +85,10 @@ fu_plugin_coldplug (FuPlugin *plugin, GError **error)
 {
 	FuPluginData *data = fu_plugin_get_data (plugin);
 	GPtrArray *hwids = fu_plugin_get_hwids (plugin);
+	const gchar *dmi_vendor;
 	g_autoptr(GPtrArray) devices = g_ptr_array_new_with_free_func ((GDestroyNotify) g_object_unref);
 
+	dmi_vendor = fu_plugin_get_dmi_value (plugin, FU_HWIDS_KEY_BIOS_VENDOR);
 	for (guint i = 0; i < hwids->len; i++) {
 		const gchar *guid = g_ptr_array_index (hwids, i);
 		const gchar *quirk_str;
@@ -100,15 +102,18 @@ fu_plugin_coldplug (FuPlugin *plugin, GError **error)
 			g_autoptr(FuDevice) dev = fu_device_new ();
 			fu_device_set_id (dev, device_id);
 			fu_device_set_quirks (dev, fu_plugin_get_quirks (plugin));
+			fu_device_set_protocol (dev, "org.flashrom");
 			fu_device_add_flag (dev, FWUPD_DEVICE_FLAG_INTERNAL);
 			fu_device_add_flag (dev, FWUPD_DEVICE_FLAG_UPDATABLE);
 			fu_device_set_name (dev, fu_plugin_get_dmi_value (plugin, FU_HWIDS_KEY_PRODUCT_NAME));
 			fu_device_set_vendor (dev, fu_plugin_get_dmi_value (plugin, FU_HWIDS_KEY_MANUFACTURER));
 			fu_device_add_flag (dev, FWUPD_DEVICE_FLAG_ENSURE_SEMVER);
-			fu_device_set_version (dev,
-					       fu_plugin_get_dmi_value (plugin, FU_HWIDS_KEY_BIOS_VERSION),
-					       FWUPD_VERSION_FORMAT_UNKNOWN);
+			fu_device_set_version (dev, fu_plugin_get_dmi_value (plugin, FU_HWIDS_KEY_BIOS_VERSION));
 			fu_device_add_guid (dev, guid);
+			if (dmi_vendor != NULL) {
+				g_autofree gchar *vendor_id = g_strdup_printf ("DMI:%s", dmi_vendor);
+				fu_device_set_vendor_id (FU_DEVICE (dev), vendor_id);
+			}
 			g_ptr_array_add (devices, g_steal_pointer (&dev));
 			break;
 		}
@@ -175,7 +180,7 @@ fu_plugin_update_prepare (FuPlugin *plugin,
 
 	/* if the original firmware doesn't exist, grab it now */
 	basename = g_strdup_printf ("flashrom-%s.bin", fu_device_get_id (device));
-	firmware_orig = g_build_filename (LOCALSTATEDIR, "lib", "fwupd",
+	firmware_orig = g_build_filename (FWUPD_LOCALSTATEDIR, "lib", "fwupd",
 					  "builder", basename, NULL);
 	if (!fu_common_mkdir_parent (firmware_orig, error))
 		return FALSE;
